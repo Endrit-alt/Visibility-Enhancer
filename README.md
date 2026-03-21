@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/logo_raidsvisibilityenhancer.png" alt="RaidParty Logo" width="200">
+  <img src="screenshots/logo_raidsvisibilityenhancer.png" alt="Raids visibility Enhancer Logo" width="662">
 </p>
 
-
+<p align="center">
 Raids Visibility Enhancer is a RuneLite plugin built for raid teams that want better visibility. It is the first plugin that works with opacity to provide a better experience inside team raids and other group PvM content.
 
 The plugin is aimed at group content such as Tombs of Amascut, Chambers of Xeric, Theatre of Blood and Nex, while remaining useful anywhere a person wants better visibility.
@@ -36,4 +36,4 @@ THIS IS NOT A DYNAMIC PLUGIN. Opacity will not change dynamically, and has to be
 
 ![Example 1](screenshots/opacity1.gif)
 ![Example 2](screenshots/opacity2.gif)
-![Visibility 1](screenshots/visibility3.jpg)
+![Visibility 1](screenshots/visibility3.jpg)</p>
