@@ -21,14 +21,24 @@ THIS IS NOT A DYNAMIC PLUGIN. Opacity will not change dynamically, and has to be
 - Adjust clothing to have clear vision of the floor
 - Hide teammates their projectiles
 - Adjust teammates opacity for hp bar, hitsplats and prayers
+- Hide Thralls
+- Area/Room filter
 
 ### Outlines
 - Outline options for yourself
 - Outline options for teammates
+- Outline options for thralls
 - Only show one outline per tile if players are standing on eachother
 - Draw tiles instead of outlines for both yourself and teammates
 - Adjust outline settings
 
-![Example 1](screenshots/opacity1.gif)
-![Example 2](screenshots/opacity2.gif)
-![Visibility 1](screenshots/visibility3.jpg)
+<p align="center">
+  <img src="screenshots/screenshots/1.jpg" alt="Raids visibility Enhancer Logo" width="977">
+</p>
+<p align="center">
+  <img src="screenshots/screenshots/2.jpg" alt="Raids visibility Enhancer Logo" width="977">
+</p>
+<p align="center">
+  <img src="screenshots/screenshots/3.jpg" alt="Raids visibility Enhancer Logo" width="977">
+</p>
+
