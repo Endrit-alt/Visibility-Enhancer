@@ -211,7 +211,7 @@ public interface VisibilityEnhancerConfig extends Config
 	@Alpha
 	@ConfigItem(
 			keyName = "selfOutlineColor",
-			name = "My Highlight Color",
+			name = "My Color",
 			position = 3,
 			section = outlineSection,
 			description = "The color of your own highlight"
@@ -230,7 +230,7 @@ public interface VisibilityEnhancerConfig extends Config
 	@Alpha
 	@ConfigItem(
 			keyName = "othersOutlineColor",
-			name = "Others Highlight Color",
+			name = "Others Color",
 			position = 5,
 			section = outlineSection,
 			description = "The color of other players' highlights"
@@ -249,7 +249,7 @@ public interface VisibilityEnhancerConfig extends Config
 	@Alpha
 	@ConfigItem(
 			keyName = "thrallsOutlineColor",
-			name = "Thralls Highlight Color",
+			name = "Thralls Color",
 			position = 7,
 			section = outlineSection,
 			description = "The color of thrall highlights"
