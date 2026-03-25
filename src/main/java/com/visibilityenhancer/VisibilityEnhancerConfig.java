@@ -181,6 +181,15 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default boolean hideThralls() { return false; }
 
+	@ConfigItem(
+			keyName = "funGhostChat",
+			name = "Ghostly Chat (Woo!)",
+			position = 10,
+			section = extrasSection,
+			description = "Replaces nearby transparent players' overhead text with ghostly wailing."
+	)
+	default boolean funGhostChat() { return false; }
+
 
 	// --- OUTLINE SECTION ---
 	@ConfigSection(

@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import javax.inject.Inject;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
@@ -65,13 +66,23 @@ public class VisibilityEnhancerOverlay extends Overlay
 	// --- Spam Tracker Variables ---
 	private static final int MESSAGE_DISPLAY_DURATION_MS = 4000; // 4 seconds natural display time
 	private static final int MESSAGE_COOLDOWN_MS = 10000; // 10 seconds cooldown for SAME message
-	private static final int FAST_TYPING_COOLDOWN_MS = 2000; // 2 seconds between DIFFERENT messages
+	private static final int FAST_TYPING_COOLDOWN_MS = 1000; // 2 seconds between DIFFERENT messages
+
+	private static final String[] WOO_MESSAGES = {
+			"Wooo wooo wooooo",
+			"Woo woo?",
+			"Woooooooo.",
+			"Wooo...",
+			"Woo!",
+			"Woooooooooo!"
+	};
 
 	private static class SpamTracker
 	{
-		String text;
-		Instant firstSeen; // When the CURRENT text was first spoken
-		Instant lastSpoke; // When the player last spoke ANY accepted message
+		String originalText;
+		String wooText; // Caches the random phrase so it doesn't flicker every frame
+		Instant firstSeen;
+		Instant lastSpoke;
 	}
 
 	// WeakHashMap automatically cleans up players when they log out or leave the area
@@ -524,7 +535,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		Instant now = Instant.now();
 
 		// If it's the exact SAME message
-		if (tracker.text != null && tracker.text.equals(text))
+		if (tracker.originalText != null && tracker.originalText.equals(text))
 		{
 			long elapsedSinceFirst = Duration.between(tracker.firstSeen, now).toMillis();
 
@@ -538,6 +549,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 			{
 				tracker.firstSeen = now;
 				tracker.lastSpoke = now;
+				tracker.wooText = WOO_MESSAGES[ThreadLocalRandom.current().nextInt(WOO_MESSAGES.length)];
 			}
 		}
 		// If it's a completely NEW message
@@ -551,20 +563,24 @@ public class VisibilityEnhancerOverlay extends Overlay
 			}
 
 			// Approved! Update tracker to this new message
-			tracker.text = text;
+			tracker.originalText = text;
+			tracker.wooText = WOO_MESSAGES[ThreadLocalRandom.current().nextInt(WOO_MESSAGES.length)];
 			tracker.firstSeen = now;
 			tracker.lastSpoke = now;
 		}
 		// -------------------------
 
+		// Decide which text to actually draw
+		String displayText = config.funGhostChat() ? tracker.wooText : text;
+
 		int zOffset = 20;
-		Point textPoint = player.getCanvasTextLocation(graphics, text, player.getLogicalHeight() + zOffset);
+		Point textPoint = player.getCanvasTextLocation(graphics, displayText, player.getLogicalHeight() + zOffset);
 		if (textPoint == null) return;
 
 		graphics.setFont(FontManager.getRunescapeBoldFont());
 		FontMetrics fontMetrics = graphics.getFontMetrics();
 
-		String cleanText = Text.removeTags(text);
+		String cleanText = Text.removeTags(displayText);
 		int textWidth = fontMetrics.stringWidth(cleanText);
 		int textHeight = fontMetrics.getHeight();
 
@@ -593,7 +609,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 		Point adjustedPoint = new Point(drawX, drawY);
 
-		OverlayUtil.renderTextLocation(graphics, adjustedPoint, text, Color.YELLOW);
+		OverlayUtil.renderTextLocation(graphics, adjustedPoint, displayText, Color.YELLOW);
 	}
 
 	private int getSpriteId(HeadIcon icon)
