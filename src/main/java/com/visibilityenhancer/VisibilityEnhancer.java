@@ -26,9 +26,9 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.HotkeyListener;
 
 @PluginDescriptor(
-        name = "Visibility Enhancer",
-        description = "Teammate opacity, ground-view filters, and outlines for raids.",
-        tags = {"raid", "raids", "raids visibility enhancer", "opacity", "outline", "equipment"}
+        name = "10/10 Vision",
+        description = "(Formerly Visibility Enhancer) Teammate opacity, ground-view filters, and outlines for raids.",
+        tags = {"raid", "raids", "raids visibility enhancer","visibility enhancer", "opacity", "outline", "equipment","visibility","Ghost"}
 )
 public class VisibilityEnhancer extends Plugin
 {
