@@ -394,11 +394,13 @@ public class VisibilityEnhancer extends Plugin
 
       if (p == local)
       {
-         originalEquipmentMap.remove(p);
-
          if (config.selfClearGround())
          {
             applyClothingFilter(p);
+         }
+         else
+         {
+            restoreClothing(p);
          }
 
          applyConfiguredOpacity(p);
@@ -410,6 +412,10 @@ public class VisibilityEnhancer extends Plugin
          if (config.othersClearGround())
          {
             applyClothingFilter(p);
+         }
+         else
+         {
+            restoreClothing(p);
          }
 
          applyConfiguredOpacity(p);
@@ -554,14 +560,14 @@ public class VisibilityEnhancer extends Plugin
          currentInRange.addAll(inRange);
       }
 
-      int opacity = config.othersClearGround() ? 100 : config.playerOpacity();
+      int othersOpacity = config.playerOpacity();
       boolean hideOthersClothes = config.othersClearGround();
 
       for (Player p : currentInRange)
       {
-         if (opacity < 100)
+         if (othersOpacity < 100)
          {
-            applyOpacity(p, opacity);
+            applyOpacity(p, othersOpacity);
          }
          else
          {
@@ -606,7 +612,7 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
-      int selfOpacity = config.selfClearGround() ? 100 : config.selfOpacity();
+      int selfOpacity = config.selfOpacity();
 
       if (selfOpacity < 100)
       {
@@ -760,10 +766,10 @@ public class VisibilityEnhancer extends Plugin
 
       if (player == local)
       {
-         return config.selfClearGround() ? 100 : config.selfOpacity();
+         return config.selfOpacity();
       }
 
-      return config.othersClearGround() ? 100 : config.playerOpacity();
+      return config.playerOpacity();
    }
 
    private void checkStateTransition()
