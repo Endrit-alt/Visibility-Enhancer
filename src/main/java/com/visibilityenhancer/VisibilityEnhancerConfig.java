@@ -55,20 +55,11 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default boolean ignoreFriends() { return false; }
 
-	@ConfigItem(
-			keyName = "limitAffectedPlayers",
-			name = "Limit Max Others",
-			position = 6,
-			section = opacitySection,
-			description = "Limits the number of players affected for performance"
-	)
-	default boolean limitAffectedPlayers() { return true; }
-
 	@Range(min = 1, max = 100)
 	@ConfigItem(
 			keyName = "maxAffectedPlayers",
 			name = "Max Others",
-			position = 7,
+			position = 6,
 			section = opacitySection,
 			description = "The maximum number of players to apply effects to"
 	)
@@ -94,7 +85,7 @@ public interface VisibilityEnhancerConfig extends Config
 
 	@ConfigItem(
 			keyName = "othersClearGround",
-			name = "Clear Ground Others (8 max)",
+			name = "Clear Ground Others",
 			position = 2,
 			section = extrasSection,
 			description = "Hides Cape, Shield, Legs, and Boots on nearby affected players."
@@ -456,7 +447,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = stackSection,
 			description = "Color of the pulse and text when the stack threshold is reached."
 	)
-	default Color stackWarningColor() { return new Color(255, 0, 0, 25); } // Default to Red
+	default Color stackWarningColor() { return new Color(255, 0, 0, 25); }
 
 
 

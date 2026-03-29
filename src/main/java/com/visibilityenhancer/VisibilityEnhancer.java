@@ -561,10 +561,6 @@ public class VisibilityEnhancer extends Plugin
       int localX = localLoc.getSceneX();
       int localY = localLoc.getSceneY();
 
-      // If Clear Ground (Others) is enabled, force Max Others to 8
-      boolean effectiveLimitAffectedPlayers = config.limitAffectedPlayers() || config.othersClearGround();
-      int effectiveMaxAffectedPlayers = config.othersClearGround() ? 8 : config.maxAffectedPlayers();
-
       for (Player p : client.getPlayers())
       {
          if (p == null || p == local)
@@ -598,7 +594,7 @@ public class VisibilityEnhancer extends Plugin
          }
       }
 
-      if (effectiveLimitAffectedPlayers && inRange.size() > effectiveMaxAffectedPlayers)
+      if (inRange.size() > config.maxAffectedPlayers())
       {
          inRange.sort((p1, p2) ->
          {
@@ -616,7 +612,7 @@ public class VisibilityEnhancer extends Plugin
             return Integer.compare(dist1, dist2);
          });
 
-         currentInRange.addAll(inRange.subList(0, effectiveMaxAffectedPlayers));
+         currentInRange.addAll(inRange.subList(0, config.maxAffectedPlayers()));
       }
       else
       {
@@ -755,7 +751,7 @@ public class VisibilityEnhancer extends Plugin
          {
             if (selfOpacity < 100)
             {
-               applyModelAlpha(null, m, selfAlpha); // Null for non-player entities like projectiles
+               applyModelAlpha(null, m, selfAlpha);
             }
             else
             {
@@ -766,7 +762,7 @@ public class VisibilityEnhancer extends Plugin
          {
             if (othersOpacity < 100)
             {
-               applyModelAlpha(null, m, othersAlpha); // Null for non-player entities like projectiles
+               applyModelAlpha(null, m, othersAlpha);
             }
             else
             {
@@ -1096,26 +1092,22 @@ public class VisibilityEnhancer extends Plugin
 
       byte[] trans = model.getFaceTransparencies();
 
-      // A player is in their "base state" if they are not playing an animation or a graphic
       boolean isBaseState = (p.getAnimation() == -1 && p.getGraphic() == -1);
 
       if (isBaseState)
       {
-         // If they are in their base state and have no transparency array, they are immune.
          if (trans == null || trans.length == 0)
          {
             immunePlayers.add(p);
-            return; // Cannot apply opacity anyway
+            return;
          }
          else
          {
-            // They equipped something transparent, remove immunity
             immunePlayers.remove(p);
          }
       }
       else
       {
-         // If they are animating, but we previously flagged their base model as immune, skip them!
          if (immunePlayers.contains(p))
          {
             return;
