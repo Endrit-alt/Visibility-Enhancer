@@ -881,6 +881,13 @@ public class VisibilityEnhancer extends Plugin
       if (renderable instanceof Projectile && (peekHeld || config.hideOthersProjectiles()))
       {
          Projectile proj = (Projectile) renderable;
+
+         // FIX: Never hide critical raid projectiles (like the Sotetseg death ball)
+         if (BOSS_PROJECTILES.contains(proj.getId()))
+         {
+            return true;
+         }
+
          Actor target = proj.getInteracting();
          return target == null || target == cachedLocalPlayer || myProjectiles.contains(proj);
       }
