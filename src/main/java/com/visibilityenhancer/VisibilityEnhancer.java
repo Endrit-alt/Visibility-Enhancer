@@ -471,7 +471,7 @@ public class VisibilityEnhancer extends Plugin
          }
 
          Model model = cachedLocalPlayer.getModel();
-         boolean hasOverride = model != null && model.getOverrideAmount() != 0;
+         boolean hasOverride = model != null && (model.getOverrideAmount() != 0 || overrideForcedPlayers.contains(cachedLocalPlayer));
 
          localPlayerExemptFromCull = hasGraphic || hasOverride;
       }
