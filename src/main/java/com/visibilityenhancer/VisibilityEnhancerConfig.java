@@ -394,7 +394,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = outlineSection,
 			description = "The color of other players' highlights"
 	)
-	default Color othersOutlineColor() { return new Color(255, 255, 255, 25); }
+	default Color othersOutlineColor() { return new Color(255, 255, 255, 15); }
 
 	@ConfigItem(
 			keyName = "highlightThralls",
@@ -413,7 +413,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = outlineSection,
 			description = "The color of thrall highlights"
 	)
-	default Color thrallsOutlineColor() { return new Color(0, 255, 255, 25); }
+	default Color thrallsOutlineColor() { return new Color(0, 255, 255, 15); }
 
 
 	// --- OUTLINE STYLE SECTION ---
