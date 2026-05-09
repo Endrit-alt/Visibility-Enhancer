@@ -23,7 +23,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = opacitySection,
 			description = "Transparency of your own character and your projectiles"
 	)
-	default int selfOpacity() { return 0; }
+	default int selfOpacity() { return 100; }
 
 	@Range(min = 0, max = 100)
 	@Units(Units.PERCENT)
