@@ -195,7 +195,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = extrasSection,
 			description = "(Requires 'Transparent Others Extras' enabled)<br>Transparency of replaced overhead prayers"
 	)
-	default int prayersOpacity() { return 15; }
+	default int prayersOpacity() { return 10; }
 
 	@Range(min = 0, max = 100)
 	@Units(Units.PERCENT)
@@ -206,7 +206,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = extrasSection,
 			description = "(Requires 'Transparent Others Extras' enabled)<br>Transparency of replaced HP bars"
 	)
-	default int hpBarOpacity() { return 20; }
+	default int hpBarOpacity() { return 15; }
 
 	@Range(min = 0, max = 100)
 	@Units(Units.PERCENT)
@@ -217,7 +217,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = extrasSection,
 			description = "(Requires 'Transparent Others Extras' enabled)<br>Transparency of replaced hitsplats"
 	)
-	default int hitsplatsOpacity() { return 20; }
+	default int hitsplatsOpacity() { return 15; }
 
 	@ConfigItem(
 			keyName = "hideHitsplatBackground",
