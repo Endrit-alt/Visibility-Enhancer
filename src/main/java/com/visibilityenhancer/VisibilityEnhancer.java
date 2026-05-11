@@ -104,6 +104,7 @@ public class VisibilityEnhancer extends Plugin
 
    private boolean wasActive = false;
    private boolean isSelfHidden = false; // Cached 0% self-opacity state
+   private boolean localPlayerHasCriticalSpotAnim = false;
 
    // Cache the region so we don't calculate it every single frame in shouldDraw
    private int currentRegionId = -1;
@@ -492,37 +493,42 @@ public class VisibilityEnhancer extends Plugin
 
       // Cache the exemption state here to prevent iterator allocations in shouldDraw
       localPlayerExemptFromCull = false;
+      localPlayerHasCriticalSpotAnim = false; // Reset every tick
+
       if (cachedLocalPlayer != null)
       {
-         boolean hasGraphic = false;
-
-         // We still skip graphics if doing a skilling/teleport animation (EXEMPT_ANIMATIONS)
-         if (!isExemptAnimation(cachedLocalPlayer))
+         // 1. Unconditionally check for CRITICAL spotanims
+         int currentGraphic = cachedLocalPlayer.getGraphic();
+         if (currentGraphic != -1 && CRITICAL_SPOTANIMS.contains(currentGraphic))
          {
-            // Check the primary graphic slot
-            int currentGraphic = cachedLocalPlayer.getGraphic();
-            if (currentGraphic != -1 && !IGNORED_SELF_GRAPHICS.contains(currentGraphic))
-            {
-               hasGraphic = true;
-            }
+            localPlayerHasCriticalSpotAnim = true;
+         }
 
-            if (!hasGraphic && cachedLocalPlayer.getSpotAnims() != null)
+         if (!localPlayerHasCriticalSpotAnim && cachedLocalPlayer.getSpotAnims() != null)
+         {
+            for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
             {
-               for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
+               if (CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
                {
-                  if (!IGNORED_SELF_GRAPHICS.contains(spotAnim.getId()))
-                  {
-                     hasGraphic = true;
-                     break;
-                  }
+                  localPlayerHasCriticalSpotAnim = true;
+                  break;
                }
             }
+         }
+
+         // 2. Standard graphics check (still respects exempt animations)
+         boolean hasGraphic = false;
+         if (!isExemptAnimation(cachedLocalPlayer))
+         {
+            hasGraphic = cachedLocalPlayer.getGraphic() != -1 ||
+                    (cachedLocalPlayer.getSpotAnims() != null && cachedLocalPlayer.getSpotAnims().iterator().hasNext());
          }
 
          Model model = cachedLocalPlayer.getModel();
          boolean hasOverride = model != null && (model.getOverrideAmount() != 0 || overrideForcedPlayers.contains(cachedLocalPlayer));
 
-         localPlayerExemptFromCull = hasGraphic || hasOverride;
+         // Exempt the player from being culled if they have any valid graphic, override, OR a critical spotanim
+         localPlayerExemptFromCull = hasGraphic || hasOverride || localPlayerHasCriticalSpotAnim;
       }
 
       if (config.distanceBasedOpacity() && !peekHeld)
@@ -1053,7 +1059,20 @@ public class VisibilityEnhancer extends Plugin
 
    private int getEffectiveSelfOpacity()
    {
-      return config.selfClearGround() ? 100 : config.selfOpacity();
+      if (config.selfClearGround())
+      {
+         return 100;
+      }
+
+      int baseOpacity = config.selfOpacity();
+
+      // NEW: Override to 1% if they would be at 0% but have a critical visual active
+      if (baseOpacity == 0 && localPlayerHasCriticalSpotAnim)
+      {
+         return 1;
+      }
+
+      return baseOpacity;
    }
 
    private int getEffectiveOthersOpacity()
@@ -1158,14 +1177,7 @@ public class VisibilityEnhancer extends Plugin
 
       int currentCycle = client.getGameCycle();
 
-      if (isExemptAnimation(player))
-      {
-         overrideStartCycle.remove(player);
-         overrideLastSeenCycle.remove(player);
-         overrideForcedPlayers.remove(player);
-         return false;
-      }
-
+      // 1. Active Override takes absolute priority over everything else.
       if (model.getOverrideAmount() != 0)
       {
          overrideLastSeenCycle.put(player, currentCycle);
@@ -1191,6 +1203,17 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
+      // 2. If there is NO active override, and they do an exempt animation (like attacking),
+      // instantly drop any delayed opaque state.
+      if (isExemptAnimation(player))
+      {
+         overrideStartCycle.remove(player);
+         overrideLastSeenCycle.remove(player);
+         overrideForcedPlayers.remove(player);
+         return false;
+      }
+
+      // 3. Otherwise, process the standard clear-delay grace period.
       Integer lastSeenCycle = overrideLastSeenCycle.get(player);
 
       if (overrideForcedPlayers.contains(player))
