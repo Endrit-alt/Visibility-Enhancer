@@ -34,6 +34,7 @@ public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 2;
+   private static final int CRITICAL_SPOTANIM_CLEAR_DELAY_CYCLES = 35;
 
    @Inject
    private Client client;
@@ -105,6 +106,7 @@ public class VisibilityEnhancer extends Plugin
    private boolean wasActive = false;
    private boolean isSelfHidden = false; // Cached 0% self-opacity state
    private boolean localPlayerHasCriticalSpotAnim = false;
+   private int lastCriticalSpotAnimCycle = -1;
 
    // Cache the region so we don't calculate it every single frame in shouldDraw
    private int currentRegionId = -1;
@@ -497,26 +499,47 @@ public class VisibilityEnhancer extends Plugin
 
       if (cachedLocalPlayer != null)
       {
+         boolean foundCriticalThisTick = false;
+
          // 1. Unconditionally check for CRITICAL spotanims
          int currentGraphic = cachedLocalPlayer.getGraphic();
          if (currentGraphic != -1 && CRITICAL_SPOTANIMS.contains(currentGraphic))
          {
-            localPlayerHasCriticalSpotAnim = true;
+            foundCriticalThisTick = true;
          }
 
-         if (!localPlayerHasCriticalSpotAnim && cachedLocalPlayer.getSpotAnims() != null)
+         if (!foundCriticalThisTick && cachedLocalPlayer.getSpotAnims() != null)
          {
             for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
             {
                if (CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
                {
-                  localPlayerHasCriticalSpotAnim = true;
+                  foundCriticalThisTick = true;
                   break;
                }
             }
          }
 
-         // 2. Standard graphics check (still respects exempt animations)
+         // 2. Apply the Grace Period (Clear Delay)
+         int currentCycle = client.getGameCycle();
+
+         if (foundCriticalThisTick)
+         {
+            lastCriticalSpotAnimCycle = currentCycle;
+            localPlayerHasCriticalSpotAnim = true;
+         }
+         else if (lastCriticalSpotAnimCycle != -1 && (currentCycle - lastCriticalSpotAnimCycle <= CRITICAL_SPOTANIM_CLEAR_DELAY_CYCLES))
+         {
+            // The graphic is gone, but we are still within the delay window
+            localPlayerHasCriticalSpotAnim = true;
+         }
+         else
+         {
+            // Delay has expired
+            lastCriticalSpotAnimCycle = -1;
+         }
+
+         // 3. Standard graphics check (still respects exempt animations)
          boolean hasGraphic = false;
          if (!isExemptAnimation(cachedLocalPlayer))
          {
