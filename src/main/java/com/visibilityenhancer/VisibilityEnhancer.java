@@ -34,7 +34,7 @@ public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 2;
-   private static final int CRITICAL_SPOTANIM_CLEAR_DELAY_CYCLES = 35;
+   private static final int CRITICAL_SPOTANIM_CLEAR_DELAY_CYCLES = 150;
 
    @Inject
    private Client client;
