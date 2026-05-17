@@ -34,7 +34,6 @@ public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 2;
-   private static final int CRITICAL_SPOTANIM_CLEAR_DELAY_CYCLES = 150;
 
    @Inject
    private Client client;
@@ -105,8 +104,6 @@ public class VisibilityEnhancer extends Plugin
 
    private boolean wasActive = false;
    private boolean isSelfHidden = false; // Cached 0% self-opacity state
-   private boolean localPlayerHasCriticalSpotAnim = false;
-   private int lastCriticalSpotAnimCycle = -1;
 
    // Cache the region so we don't calculate it every single frame in shouldDraw
    private int currentRegionId = -1;
@@ -197,6 +194,11 @@ public class VisibilityEnhancer extends Plugin
            13106 // Zalcano
    );
 
+   // Regions where local player 0% culling is strictly disabled to preserve mechanics
+   private static final Set<Integer> RESTRICTED_CULL_REGIONS = ImmutableSet.of(
+           14676, // ToA Akkha
+           12889  // CoX Olm
+   );
 
    private static final Set<Integer> EXEMPT_ANIMATIONS = ImmutableSet.<Integer>builder()
            .add(1378, 7642, 7643, 7514, 1062, 1203, 7644, 7640, 7638, 10172, 5062, 9168, 8104)
@@ -395,10 +397,10 @@ public class VisibilityEnhancer extends Plugin
             return config.otherNex();
          case 15515:
             return config.otherNightmare();
-         case 11827:
-         case 11828:
-         case 12084:
+         case 11669:
             return config.otherRoyalTitans();
+         case 7216:
+            return config.otherFortisColosseum();
       }
 
       if (client.getVarbitValue(Varbits.IN_RAID) == 1)
@@ -495,63 +497,37 @@ public class VisibilityEnhancer extends Plugin
 
       // Cache the exemption state here to prevent iterator allocations in shouldDraw
       localPlayerExemptFromCull = false;
-      localPlayerHasCriticalSpotAnim = false; // Reset every tick
-
       if (cachedLocalPlayer != null)
       {
-         boolean foundCriticalThisTick = false;
-
-         // 1. Unconditionally check for CRITICAL spotanims
-         int currentGraphic = cachedLocalPlayer.getGraphic();
-         if (currentGraphic != -1 && CRITICAL_SPOTANIMS.contains(currentGraphic))
-         {
-            foundCriticalThisTick = true;
-         }
-
-         if (!foundCriticalThisTick && cachedLocalPlayer.getSpotAnims() != null)
-         {
-            for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
-            {
-               if (CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
-               {
-                  foundCriticalThisTick = true;
-                  break;
-               }
-            }
-         }
-
-         // 2. Apply the Grace Period (Clear Delay)
-         int currentCycle = client.getGameCycle();
-
-         if (foundCriticalThisTick)
-         {
-            lastCriticalSpotAnimCycle = currentCycle;
-            localPlayerHasCriticalSpotAnim = true;
-         }
-         else if (lastCriticalSpotAnimCycle != -1 && (currentCycle - lastCriticalSpotAnimCycle <= CRITICAL_SPOTANIM_CLEAR_DELAY_CYCLES))
-         {
-            // The graphic is gone, but we are still within the delay window
-            localPlayerHasCriticalSpotAnim = true;
-         }
-         else
-         {
-            // Delay has expired
-            lastCriticalSpotAnimCycle = -1;
-         }
-
-         // 3. Standard graphics check (still respects exempt animations)
          boolean hasGraphic = false;
+
+         // We still skip graphics if doing a skilling/teleport animation (EXEMPT_ANIMATIONS)
          if (!isExemptAnimation(cachedLocalPlayer))
          {
-            hasGraphic = cachedLocalPlayer.getGraphic() != -1 ||
-                    (cachedLocalPlayer.getSpotAnims() != null && cachedLocalPlayer.getSpotAnims().iterator().hasNext());
+            // Check the primary graphic slot
+            int currentGraphic = cachedLocalPlayer.getGraphic();
+            if (currentGraphic != -1 && !IGNORED_SELF_GRAPHICS.contains(currentGraphic))
+            {
+               hasGraphic = true;
+            }
+
+            if (!hasGraphic && cachedLocalPlayer.getSpotAnims() != null)
+            {
+               for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
+               {
+                  if (!IGNORED_SELF_GRAPHICS.contains(spotAnim.getId()))
+                  {
+                     hasGraphic = true;
+                     break;
+                  }
+               }
+            }
          }
 
          Model model = cachedLocalPlayer.getModel();
          boolean hasOverride = model != null && (model.getOverrideAmount() != 0 || overrideForcedPlayers.contains(cachedLocalPlayer));
 
-         // Exempt the player from being culled if they have any valid graphic, override, OR a critical spotanim
-         localPlayerExemptFromCull = hasGraphic || hasOverride || localPlayerHasCriticalSpotAnim;
+         localPlayerExemptFromCull = hasGraphic || hasOverride;
       }
 
       if (config.distanceBasedOpacity() && !peekHeld)
@@ -829,7 +805,8 @@ public class VisibilityEnhancer extends Plugin
       }
 
       // --- NEW: Cache the self opacity state once per tick ---
-      isSelfHidden = (config.selfOpacity() == 0);
+      // Disable the 0% physical cull in specific boss rooms to keep mechanics visible
+      isSelfHidden = (config.selfOpacity() == 0) && !RESTRICTED_CULL_REGIONS.contains(currentRegionId);
 
       // 2. NOW check state transitions and if we should be active
       checkStateTransition();
@@ -1089,8 +1066,8 @@ public class VisibilityEnhancer extends Plugin
 
       int baseOpacity = config.selfOpacity();
 
-      // NEW: Override to 1% if they would be at 0% but have a critical visual active
-      if (baseOpacity == 0 && localPlayerHasCriticalSpotAnim)
+      // Ensure that if culling is disabled for mechanics, you are not rendered fully invisible
+      if (baseOpacity == 0 && RESTRICTED_CULL_REGIONS.contains(currentRegionId))
       {
          return 1;
       }
@@ -1100,7 +1077,20 @@ public class VisibilityEnhancer extends Plugin
 
    private int getEffectiveOthersOpacity()
    {
-      return config.othersClearGround() ? 100 : config.playerOpacity();
+      if (config.othersClearGround())
+      {
+         return 100;
+      }
+
+      int baseOpacity = config.playerOpacity();
+
+      // Ensure that if culling is disabled for mechanics, others are not rendered fully invisible
+      if (baseOpacity == 0 && RESTRICTED_CULL_REGIONS.contains(currentRegionId))
+      {
+         return 1;
+      }
+
+      return baseOpacity;
    }
 
    private int getEffectiveOpacity(Player player)
@@ -1200,7 +1190,6 @@ public class VisibilityEnhancer extends Plugin
 
       int currentCycle = client.getGameCycle();
 
-      // 1. Active Override takes absolute priority over everything else.
       if (model.getOverrideAmount() != 0)
       {
          overrideLastSeenCycle.put(player, currentCycle);
@@ -1226,8 +1215,6 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
-      // 2. If there is NO active override, and they do an exempt animation (like attacking),
-      // instantly drop any delayed opaque state.
       if (isExemptAnimation(player))
       {
          overrideStartCycle.remove(player);
@@ -1236,7 +1223,6 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
-      // 3. Otherwise, process the standard clear-delay grace period.
       Integer lastSeenCycle = overrideLastSeenCycle.get(player);
 
       if (overrideForcedPlayers.contains(player))

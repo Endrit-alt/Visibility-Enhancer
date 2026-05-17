@@ -586,12 +586,16 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(name = "Other Bosses", description = "Other Boss Rooms", position = 54)
 	String otherSection = "otherSection";
 
-	@ConfigItem(keyName = "otherNex", name = "Nex", section = otherSection, position = 1, description = "Enable in Nex room")
+	@ConfigItem(keyName = "otherFortisColosseum", name = "Fortis Colosseum", section = otherSection, position = 1, description = "Enable in the Fortis Colosseum arena")
+	default boolean otherFortisColosseum() { return true; }
+
+	@ConfigItem(keyName = "otherNex", name = "Nex", section = otherSection, position = 2, description = "Enable in Nex room")
 	default boolean otherNex() { return true; }
 
-	@ConfigItem(keyName = "otherNightmare", name = "The Nightmare", section = otherSection, position = 2, description = "Enable in The Nightmare / Phosani's Nightmare")
+	@ConfigItem(keyName = "otherNightmare", name = "The Nightmare", section = otherSection, position = 3, description = "Enable in The Nightmare / Phosani's Nightmare")
 	default boolean otherNightmare() { return true; }
 
-	@ConfigItem(keyName = "otherRoyalTitans", name = "Royal Titans", section = otherSection, position = 3, description = "Enable in the Royal Titans arena")
+	@ConfigItem(keyName = "otherRoyalTitans", name = "Royal Titans", section = otherSection, position = 4, description = "Enable in the Royal Titans arena")
 	default boolean otherRoyalTitans() { return true; }
+
 }
