@@ -33,7 +33,8 @@ import net.runelite.client.util.HotkeyListener;
 public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
-   private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 2;
+   // Bumping this to 30 client cycles (1 game tick) to bridge the gap during animation model swaps
+   private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
 
    @Inject
    private Client client;
@@ -1190,6 +1191,7 @@ public class VisibilityEnhancer extends Plugin
 
       int currentCycle = client.getGameCycle();
 
+      // 1. Is the override physically active right now?
       if (model.getOverrideAmount() != 0)
       {
          overrideLastSeenCycle.put(player, currentCycle);
@@ -1215,29 +1217,32 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
+      // 2. Check the buffer BEFORE processing exempt animations
+      // This protects your opacity during 1-tick animation model swaps
+      Integer lastSeenCycle = overrideLastSeenCycle.get(player);
+      boolean withinClearDelay = (lastSeenCycle != null && currentCycle - lastSeenCycle <= OVERRIDE_CLEAR_DELAY_CYCLES);
+
+      if (overrideForcedPlayers.contains(player))
+      {
+         if (withinClearDelay)
+         {
+            return true;
+         }
+         overrideForcedPlayers.remove(player);
+      }
+      else if (withinClearDelay)
+      {
+         return true;
+      }
+
+      // 3. Buffer has officially expired or was never active
+      // NOW it is safe to process exempt animations without wiping active buffers
       if (isExemptAnimation(player))
       {
          overrideStartCycle.remove(player);
          overrideLastSeenCycle.remove(player);
          overrideForcedPlayers.remove(player);
          return false;
-      }
-
-      Integer lastSeenCycle = overrideLastSeenCycle.get(player);
-
-      if (overrideForcedPlayers.contains(player))
-      {
-         if (lastSeenCycle != null && currentCycle - lastSeenCycle <= OVERRIDE_CLEAR_DELAY_CYCLES)
-         {
-            return true;
-         }
-
-         overrideForcedPlayers.remove(player);
-      }
-
-      if (lastSeenCycle != null && currentCycle - lastSeenCycle <= OVERRIDE_CLEAR_DELAY_CYCLES)
-      {
-         return true;
       }
 
       overrideStartCycle.remove(player);
