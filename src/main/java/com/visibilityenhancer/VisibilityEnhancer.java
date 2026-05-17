@@ -33,7 +33,6 @@ import net.runelite.client.util.HotkeyListener;
 public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
-   // Bumping this to 30 client cycles (1 game tick) to bridge the gap during animation model swaps
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
 
    @Inject
