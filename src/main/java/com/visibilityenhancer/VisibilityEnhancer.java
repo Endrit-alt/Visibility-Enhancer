@@ -1218,6 +1218,7 @@ public class VisibilityEnhancer extends Plugin
             return true;
          }
 
+         // Must be active for at least 2 cycles to prove it isn't 1-tick garbage data
          if (currentCycle - startCycle >= OVERRIDE_OPAQUE_DELAY_CYCLES)
          {
             overrideForcedPlayers.add(player);
@@ -1227,8 +1228,7 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
-      // 2. Check the buffer BEFORE processing exempt animations
-      // This protects your opacity during 1-tick animation model swaps
+      // 2. Check the buffer ONLY for players who were verified
       Integer lastSeenCycle = overrideLastSeenCycle.get(player);
       boolean withinClearDelay = (lastSeenCycle != null && currentCycle - lastSeenCycle <= OVERRIDE_CLEAR_DELAY_CYCLES);
 
@@ -1236,13 +1236,9 @@ public class VisibilityEnhancer extends Plugin
       {
          if (withinClearDelay)
          {
-            return true;
+            return true; // The buffer safely protects verified overrides during animations
          }
-         overrideForcedPlayers.remove(player);
-      }
-      else if (withinClearDelay)
-      {
-         return true;
+         overrideForcedPlayers.remove(player); // Buffer expired, remove them
       }
 
       // 3. Buffer has officially expired or was never active
