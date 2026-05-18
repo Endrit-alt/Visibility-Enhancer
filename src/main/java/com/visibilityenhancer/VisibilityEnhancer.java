@@ -34,6 +34,10 @@ public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
+   // Buffer to absorb incoming enemy hit graphics after you finish attacking
+   private int lastExemptAnimationCycle = 0;
+   // 60 client cycles = exactly 2 game ticks
+   private static final int GRAPHIC_GRACE_PERIOD_CYCLES = 120;
 
    @Inject
    private Client client;
@@ -501,8 +505,14 @@ public class VisibilityEnhancer extends Plugin
       {
          boolean hasGraphic = false;
 
-         // We still skip graphics if doing a skilling/teleport animation (EXEMPT_ANIMATIONS)
-         if (!isExemptAnimation(cachedLocalPlayer))
+         // 1. Log the exact cycle if we are currently doing an exempt animation
+         if (isExemptAnimation(cachedLocalPlayer))
+         {
+            lastExemptAnimationCycle = client.getGameCycle();
+         }
+
+         // 2. Only check for visual graphics IF our 2-tick grace period has fully expired
+         if (client.getGameCycle() - lastExemptAnimationCycle > GRAPHIC_GRACE_PERIOD_CYCLES)
          {
             // Check the primary graphic slot
             int currentGraphic = cachedLocalPlayer.getGraphic();
@@ -511,6 +521,7 @@ public class VisibilityEnhancer extends Plugin
                hasGraphic = true;
             }
 
+            // Check the secondary spotAnims
             if (!hasGraphic && cachedLocalPlayer.getSpotAnims() != null)
             {
                for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
