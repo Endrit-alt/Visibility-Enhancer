@@ -522,7 +522,6 @@ public class VisibilityEnhancer extends Plugin
             criticalGraphicPlayers.add(p);
          }
 
-         // 2. Forced Override Check
          Model model = p.getModel();
          boolean hasOverride = shouldForceOpaqueForOverride(p, model);
 
@@ -531,28 +530,22 @@ public class VisibilityEnhancer extends Plugin
             exemptPlayers.add(p);
          }
 
-         // --- NEW: Combat Activity Tracker ---
          boolean activeCombatSignal = false;
 
-         // 1. Is the player attacking something aggressive?
          Actor target = p.getInteracting();
          if (target != null && target.getCombatLevel() > 0)
          {
             activeCombatSignal = true;
          }
 
-         // 2. Did the player just take/deal damage?
          if (p.getHealthRatio() > -1)
          {
             activeCombatSignal = true;
          }
 
-         // 3. ONLY count specific combat animations (exclude skilling/teleporting)
-         // We check if they are doing an attack animation, but NOT a skilling one.
          int anim = p.getAnimation();
          if (anim != -1 && !EXEMPT_ANIMATIONS.contains(anim))
          {
-            // If it's an animation NOT in your exempt list, it's likely a combat/boss anim.
             activeCombatSignal = true;
          }
 
