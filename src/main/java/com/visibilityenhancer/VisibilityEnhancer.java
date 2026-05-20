@@ -34,10 +34,10 @@ public class VisibilityEnhancer extends Plugin
 {
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
-   // Buffer to absorb incoming enemy hit graphics after you finish attacking
-   private int lastExemptAnimationCycle = 0;
-   // 60 client cycles = exactly 2 game ticks
-   private static final int GRAPHIC_GRACE_PERIOD_CYCLES = 120;
+   private static final int CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES = 120;
+
+   private final Map<Player, Integer> lastCombatCycleMap = new HashMap<>();
+   private static final int COMBAT_TIMEOUT_CYCLES = 300; // 10 game ticks of "memory"
 
    @Inject
    private Client client;
@@ -73,43 +73,38 @@ public class VisibilityEnhancer extends Plugin
 
    @Getter
    private final Set<Player> ghostedPlayers = new HashSet<>();
-
    private final Set<Player> fallbackHiddenPlayers = new HashSet<>();
 
    private final Map<Player, int[]> originalEquipmentMap = new HashMap<>();
    private final Set<Projectile> myProjectiles = new HashSet<>();
    private final Map<byte[], byte[]> originalTransparencies = new WeakHashMap<>();
 
-   // Tracks all modified transparency arrays per player to prevent orphaned models
    private final Map<Player, Set<byte[]>> playerTrackedTransparencies = new WeakHashMap<>();
 
-   // Tracks players whose base models cannot support transparency
    private final Set<Player> immunePlayers = new HashSet<>();
-
-   // Tracks players whose base models have proven they do support transparency
    private final Set<Player> supportedPlayers = new HashSet<>();
 
    private final Map<Player, Integer> overrideStartCycle = new HashMap<>();
    private final Map<Player, Integer> overrideLastSeenCycle = new HashMap<>();
    private final Set<Player> overrideForcedPlayers = new HashSet<>();
 
-   // Cached Maps for onBeforeRender to prevent frame-by-frame memory allocation
+   // NEW Sets to manage logic for ALL players simultaneously
+   private final Map<Player, Integer> lastCriticalGraphicCycleMap = new HashMap<>();
+   private final Set<Player> criticalGraphicPlayers = new HashSet<>();
+   private final Set<Player> exemptPlayers = new HashSet<>();
+   private final Set<Player> culledPlayers = new HashSet<>();
+
    private final Map<byte[], Model> arrayToModel = new HashMap<>();
    private final Map<byte[], Integer> arrayState = new HashMap<>();
 
    private final Hooks.RenderableDrawListener drawListener = this::shouldDraw;
 
    private Player cachedLocalPlayer;
-   private boolean localPlayerExemptFromCull = false;
-
    private final List<Player> inRange = new ArrayList<>();
    private final Set<Player> currentInRange = new HashSet<>();
    private final Set<Player> noLongerGhosted = new HashSet<>();
 
    private boolean wasActive = false;
-   private boolean isSelfHidden = false; // Cached 0% self-opacity state
-
-   // Cache the region so we don't calculate it every single frame in shouldDraw
    private int currentRegionId = -1;
 
    private final HotkeyListener hotkeyListener = new HotkeyListener(() -> config.toggleHotkey())
@@ -179,7 +174,6 @@ public class VisibilityEnhancer extends Plugin
       }
    };
 
-   // Regions where projectile hiding is entirely disabled (killswitch replacement)
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
            12613, // ToB Maiden
            13123, 13379, // ToB Sote
@@ -198,11 +192,6 @@ public class VisibilityEnhancer extends Plugin
            13106 // Zalcano
    );
 
-   // Regions where local player 0% culling is strictly disabled to preserve mechanics
-   private static final Set<Integer> RESTRICTED_CULL_REGIONS = ImmutableSet.of(
-           14676, // ToA Akkha
-           12889  // CoX Olm
-   );
 
    private static final Set<Integer> EXEMPT_ANIMATIONS = ImmutableSet.<Integer>builder()
            .add(1378, 7642, 7643, 7514, 1062, 1203, 7644, 7640, 7638, 10172, 5062, 9168, 8104)
@@ -292,21 +281,10 @@ public class VisibilityEnhancer extends Plugin
            .add(2145, 2146, 317) //Kephri dung
            .add(2132, 2133, 2134, 2135 ,2136, 2137, 2138, 2139) //Sight Monkey Room
            .add(1568, 1569, 1570, 1571, 1572, 1573) //bloat
-           .add(1359, 1360, 1361, 1362, 1363, 1349, 1350, 1351) //olm
+           .add(246, 1349, 1350, 1351, 1352, 1353, 1354, 1355, 1356, 1357, 1358, 1359, 1360, 1361, 1362, 1363) //olm
            .add(1604, 1605) //sotesegg
            .add (1997, 1998, 2002, 2003) //nex
            .add (2197, 2198, 2199, 2200, 2203) //wardens
-           .build();
-
-   // Casting graphics
-   private static final Set<Integer> IGNORED_SELF_GRAPHICS = ImmutableSet.<Integer>builder()
-           .add(111)
-           .add(1888,1923,1925,1927,1929,1931,1933,1935) //bowfa
-           .add(1540,1900,2125,2903,2904,2905,2906,3018,3720,1455, 1458, 1461, 1464, 84,87,1543,1546,1719,1722) //casting
-           .add(2059,2903,2904,2905,2906,3720,1250,1251)
-           .add(2834,1205,1206,1207,1208,2804,1292,1171) //specs
-           .add(246,247,332,482,559,1577,56,451,715) //Teleport spotanims
-           .add(665)
            .build();
 
    @Getter
@@ -444,8 +422,6 @@ public class VisibilityEnhancer extends Plugin
             }
             else
             {
-               // We have 4 hitsplats. Find the best candidate to evict.
-               // Priority: Oldest 0-damage hit > Oldest damage hit.
                int targetIndex = -1;
                boolean foundZero = false;
 
@@ -461,25 +437,23 @@ public class VisibilityEnhancer extends Plugin
                      }
                      else if (h.getDespawnTick() < list.get(targetIndex).getDespawnTick())
                      {
-                        targetIndex = i; // Older zero-damage hit
+                        targetIndex = i;
                      }
                   }
                   else if (!foundZero)
                   {
                      if (targetIndex == -1 || h.getDespawnTick() < list.get(targetIndex).getDespawnTick())
                      {
-                        targetIndex = i; // Oldest non-zero hit
+                        targetIndex = i;
                      }
                   }
                }
 
-               // If the new hit is a 0, and the only things we can evict are actual damage hits, just discard the 0.
                if (amount == 0 && !foundZero)
                {
                   return;
                }
 
-               // Replace the chosen hitsplat in place so the grid doesn't shuffle visually
                if (targetIndex != -1)
                {
                   list.set(targetIndex, newHit);
@@ -499,48 +473,106 @@ public class VisibilityEnhancer extends Plugin
 
       cachedLocalPlayer = client.getLocalPlayer();
 
-      // Cache the exemption state here to prevent iterator allocations in shouldDraw
-      localPlayerExemptFromCull = false;
+      // Clear the sets exactly once per tick to recalculate everyone flawlessly
+      exemptPlayers.clear();
+      criticalGraphicPlayers.clear();
+      culledPlayers.clear();
+
+      List<Player> playersToCheck = new ArrayList<>(currentInRange);
       if (cachedLocalPlayer != null)
       {
-         boolean hasGraphic = false;
+         playersToCheck.add(cachedLocalPlayer);
+      }
 
-         // 1. Log the exact cycle if we are currently doing an exempt animation
-         if (isExemptAnimation(cachedLocalPlayer))
+      int currentCycle = client.getGameCycle();
+
+      for (Player p : playersToCheck)
+      {
+         // 1. Critical Graphic Check
+         boolean activelyHasCriticalGraphic = false;
+         int currentGraphic = p.getGraphic();
+
+         if (currentGraphic != -1 && CRITICAL_SPOTANIMS.contains(currentGraphic))
          {
-            lastExemptAnimationCycle = client.getGameCycle();
+            activelyHasCriticalGraphic = true;
          }
-
-         // 2. Only check for visual graphics IF our 2-tick grace period has fully expired
-         if (client.getGameCycle() - lastExemptAnimationCycle > GRAPHIC_GRACE_PERIOD_CYCLES)
+         else if (p.getSpotAnims() != null)
          {
-            // Check the primary graphic slot
-            int currentGraphic = cachedLocalPlayer.getGraphic();
-            if (currentGraphic != -1 && !IGNORED_SELF_GRAPHICS.contains(currentGraphic))
+            for (ActorSpotAnim spotAnim : p.getSpotAnims())
             {
-               hasGraphic = true;
-            }
-
-            // Check the secondary spotAnims
-            if (!hasGraphic && cachedLocalPlayer.getSpotAnims() != null)
-            {
-               for (ActorSpotAnim spotAnim : cachedLocalPlayer.getSpotAnims())
+               if (CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
                {
-                  if (!IGNORED_SELF_GRAPHICS.contains(spotAnim.getId()))
-                  {
-                     hasGraphic = true;
-                     break;
-                  }
+                  activelyHasCriticalGraphic = true;
+                  break;
                }
             }
          }
 
-         Model model = cachedLocalPlayer.getModel();
-         boolean hasOverride = model != null && (model.getOverrideAmount() != 0 || overrideForcedPlayers.contains(cachedLocalPlayer));
+         if (activelyHasCriticalGraphic)
+         {
+            lastCriticalGraphicCycleMap.put(p, currentCycle);
+         }
 
-         localPlayerExemptFromCull = hasGraphic || hasOverride;
+         Integer lastGraphicCycle = lastCriticalGraphicCycleMap.get(p);
+         boolean hasCriticalGraphic = lastGraphicCycle != null &&
+                 (currentCycle - lastGraphicCycle <= CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES);
+
+         if (hasCriticalGraphic)
+         {
+            criticalGraphicPlayers.add(p);
+         }
+
+         // 2. Forced Override Check
+         Model model = p.getModel();
+         boolean hasOverride = shouldForceOpaqueForOverride(p, model);
+
+         if (hasCriticalGraphic || hasOverride)
+         {
+            exemptPlayers.add(p);
+         }
+
+         // --- NEW: Combat Activity Tracker ---
+         boolean activeCombatSignal = false;
+
+         // 1. Is the player attacking something aggressive?
+         Actor target = p.getInteracting();
+         if (target != null && target.getCombatLevel() > 0)
+         {
+            activeCombatSignal = true;
+         }
+
+         // 2. Did the player just take/deal damage?
+         if (p.getHealthRatio() > -1)
+         {
+            activeCombatSignal = true;
+         }
+
+         // 3. ONLY count specific combat animations (exclude skilling/teleporting)
+         // We check if they are doing an attack animation, but NOT a skilling one.
+         int anim = p.getAnimation();
+         if (anim != -1 && !EXEMPT_ANIMATIONS.contains(anim))
+         {
+            // If it's an animation NOT in your exempt list, it's likely a combat/boss anim.
+            activeCombatSignal = true;
+         }
+
+         if (activeCombatSignal)
+         {
+            lastCombatCycleMap.put(p, currentCycle);
+         }
+
+         // 3. Distance Math & 0% Cull Check
+         int opacity = getEffectiveOpacity(p);
+
+         if (opacity == 0 && !exemptPlayers.contains(p))
+         {
+            culledPlayers.add(p);
+         }
+
+
       }
 
+      // Rest of tick logic
       if (config.distanceBasedOpacity() && !peekHeld)
       {
          for (Player p : currentInRange)
@@ -649,6 +681,12 @@ public class VisibilityEnhancer extends Plugin
       overrideForcedPlayers.remove(p);
       immunePlayers.remove(p);
       supportedPlayers.remove(p);
+
+      lastCriticalGraphicCycleMap.remove(p);
+      criticalGraphicPlayers.remove(p);
+      exemptPlayers.remove(p);
+      culledPlayers.remove(p);
+      lastCombatCycleMap.remove(p);
    }
 
    @Subscribe
@@ -667,7 +705,6 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
-      // FIX: Capture the fresh, real gear before we apply the -1 filters again
       if (originalEquipmentMap.containsKey(p) && p.getPlayerComposition() != null)
       {
          originalEquipmentMap.put(p, p.getPlayerComposition().getEquipmentIds().clone());
@@ -804,7 +841,6 @@ public class VisibilityEnhancer extends Plugin
    @Subscribe
    public void onGameTick(GameTick event)
    {
-      // 1. UPDATE THE REGION FIRST so isActive() knows exactly where we are
       Player local = client.getLocalPlayer();
       if (local != null && local.getLocalLocation() != null)
       {
@@ -815,11 +851,6 @@ public class VisibilityEnhancer extends Plugin
          currentRegionId = -1;
       }
 
-      // --- NEW: Cache the self opacity state once per tick ---
-      // Disable the 0% physical cull in specific boss rooms to keep mechanics visible
-      isSelfHidden = (config.selfOpacity() == 0) && !RESTRICTED_CULL_REGIONS.contains(currentRegionId);
-
-      // 2. NOW check state transitions and if we should be active
       checkStateTransition();
 
       if (!isActive())
@@ -889,8 +920,7 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
-      int selfOpacity = getEffectiveSelfOpacity();
-      int othersOpacity = getEffectiveOthersOpacity();
+      int selfOpacity = getEffectiveOpacity(local);
 
       if (selfOpacity < 100)
       {
@@ -901,7 +931,7 @@ public class VisibilityEnhancer extends Plugin
          restoreOpacity(local);
       }
 
-      int othersAlpha = clampAlpha(othersOpacity);
+      int othersAlpha = clampAlpha(config.playerOpacity());
       int selfAlpha = clampAlpha(selfOpacity);
 
       arrayToModel.clear();
@@ -987,7 +1017,7 @@ public class VisibilityEnhancer extends Plugin
          }
          else if (state == STATE_OTHERS)
          {
-            if (othersOpacity < 100)
+            if (config.playerOpacity() < 100)
             {
                applyModelAlpha(null, m, othersAlpha);
             }
@@ -1008,7 +1038,6 @@ public class VisibilityEnhancer extends Plugin
 
       if (renderable instanceof Projectile && (peekHeld || config.hideOthersProjectiles()))
       {
-         // REGION CHECK: Disable projectile hiding completely in restricted boss rooms, solo instances, or anywhere in CoX
          if (RESTRICTED_PROJECTILE_REGIONS.contains(currentRegionId)
                  || client.getPlayers().size() <= 1
                  || client.getVarbitValue(Varbits.IN_RAID) == 1)
@@ -1025,17 +1054,12 @@ public class VisibilityEnhancer extends Plugin
       {
          Player player = (Player) renderable;
 
-         // --- Self 0% Opacity Cull (GC Optimized) ---
-         if (player == cachedLocalPlayer && isSelfHidden)
+         // --- Fast O(1) Absolute Culling Check ---
+         if (!drawingUI && culledPlayers.contains(player))
          {
-            // Only cull if: No UI drawing AND no cached visual effects/overrides
-            if (!drawingUI && !localPlayerExemptFromCull)
-            {
-               return false;
-            }
+            return false;
          }
 
-         // --- Others Fallback ---
          if (!drawingUI && fallbackHiddenPlayers.contains(player))
          {
             return false;
@@ -1068,40 +1092,22 @@ public class VisibilityEnhancer extends Plugin
       return true;
    }
 
-   private int getEffectiveSelfOpacity()
+   private boolean isInCombat(Player player)
    {
-      if (config.selfClearGround())
+      if (player == null)
       {
-         return 100;
+         return false;
       }
 
-      int baseOpacity = config.selfOpacity();
-
-      // Ensure that if culling is disabled for mechanics, you are not rendered fully invisible
-      if (baseOpacity == 0 && RESTRICTED_CULL_REGIONS.contains(currentRegionId))
+      Integer lastCombatCycle = lastCombatCycleMap.get(player);
+      if (lastCombatCycle == null)
       {
-         return 1;
+         return false;
       }
 
-      return baseOpacity;
-   }
-
-   private int getEffectiveOthersOpacity()
-   {
-      if (config.othersClearGround())
-      {
-         return 100;
-      }
-
-      int baseOpacity = config.playerOpacity();
-
-      // Ensure that if culling is disabled for mechanics, others are not rendered fully invisible
-      if (baseOpacity == 0 && RESTRICTED_CULL_REGIONS.contains(currentRegionId))
-      {
-         return 1;
-      }
-
-      return baseOpacity;
+      // If they have done a combat action within the last 10 ticks (300 cycles),
+      // consider them fully in combat so they properly cull to 0%.
+      return (client.getGameCycle() - lastCombatCycle) <= COMBAT_TIMEOUT_CYCLES;
    }
 
    private int getEffectiveOpacity(Player player)
@@ -1112,19 +1118,19 @@ public class VisibilityEnhancer extends Plugin
          return 100;
       }
 
-      if (player == local)
-      {
-         return getEffectiveSelfOpacity();
-      }
-
       if (peekHeld)
       {
          return 0;
       }
 
-      int baseOpacity = getEffectiveOthersOpacity();
+      boolean isLocal = (player == local);
+      int baseOpacity = isLocal ?
+              (config.selfClearGround() ? 100 : config.selfOpacity()) :
+              (config.othersClearGround() ? 100 : config.playerOpacity());
 
-      if (config.distanceBasedOpacity())
+      int calculatedOpacity = baseOpacity;
+
+      if (!isLocal && config.distanceBasedOpacity())
       {
          LocalPoint localLoc = local.getLocalLocation();
          LocalPoint playerLoc = player.getLocalLocation();
@@ -1136,24 +1142,35 @@ public class VisibilityEnhancer extends Plugin
             double minDist = config.fadeStartDistance() * 128.0;
             double maxDist = Math.max(minDist + 1.0, config.fadeEndDistance() * 128.0);
 
-            if (dist <= minDist)
-            {
-               return baseOpacity;
-            }
-            else if (dist >= maxDist)
-            {
-               return 100;
-            }
-            else
+            if (dist > minDist && dist < maxDist)
             {
                double fraction = (dist - minDist) / (maxDist - minDist);
                fraction = fraction * fraction;
-               return (int) (baseOpacity + ((100 - baseOpacity) * fraction));
+               calculatedOpacity = (int) (baseOpacity + ((100 - baseOpacity) * fraction));
+            }
+            else if (dist >= maxDist)
+            {
+               calculatedOpacity = 100;
             }
          }
       }
 
-      return baseOpacity;
+      // Check exceptions if they are dropping to 0% opacity
+      if (calculatedOpacity == 0)
+      {
+         if (criticalGraphicPlayers.contains(player))
+         {
+            return 1;
+         }
+
+         // If it's another player and they are NOT in combat, force 1% so they aren't fully culled
+         if (!isLocal && !isInCombat(player))
+         {
+            return 1;
+         }
+      }
+
+      return calculatedOpacity;
    }
 
    private void forceOpacityUpdate()
@@ -1201,16 +1218,14 @@ public class VisibilityEnhancer extends Plugin
 
       int currentCycle = client.getGameCycle();
 
-      // 1. Is the override physically active right now?
+      // --- 1. ABSOLUTE PRIORITY: Persistent Boss Mechanics ---
       if (model.getOverrideAmount() != 0)
       {
-         overrideLastSeenCycle.put(player, currentCycle);
-
          Integer startCycle = overrideStartCycle.get(player);
          if (startCycle == null)
          {
             overrideStartCycle.put(player, currentCycle);
-            return overrideForcedPlayers.contains(player);
+            startCycle = currentCycle;
          }
 
          if (overrideForcedPlayers.contains(player))
@@ -1218,17 +1233,28 @@ public class VisibilityEnhancer extends Plugin
             return true;
          }
 
-         // Must be active for at least 2 cycles to prove it isn't 1-tick garbage data
+         // Must be active for delay to prove it isn't 1-tick garbage combat data
          if (currentCycle - startCycle >= OVERRIDE_OPAQUE_DELAY_CYCLES)
          {
             overrideForcedPlayers.add(player);
+            overrideLastSeenCycle.put(player, currentCycle);
             return true;
          }
+      }
+      else
+      {
+         overrideStartCycle.remove(player);
+      }
 
+      // --- 2. COMBAT SHIELD ---
+      if (isExemptAnimation(player))
+      {
+         overrideLastSeenCycle.remove(player);
+         overrideForcedPlayers.remove(player);
          return false;
       }
 
-      // 2. Check the buffer ONLY for players who were verified
+      // --- 3. Linger Delay ---
       Integer lastSeenCycle = overrideLastSeenCycle.get(player);
       boolean withinClearDelay = (lastSeenCycle != null && currentCycle - lastSeenCycle <= OVERRIDE_CLEAR_DELAY_CYCLES);
 
@@ -1236,22 +1262,11 @@ public class VisibilityEnhancer extends Plugin
       {
          if (withinClearDelay)
          {
-            return true; // The buffer safely protects verified overrides during animations
+            return true;
          }
-         overrideForcedPlayers.remove(player); // Buffer expired, remove them
-      }
-
-      // 3. Buffer has officially expired or was never active
-      // NOW it is safe to process exempt animations without wiping active buffers
-      if (isExemptAnimation(player))
-      {
-         overrideStartCycle.remove(player);
-         overrideLastSeenCycle.remove(player);
          overrideForcedPlayers.remove(player);
-         return false;
       }
 
-      overrideStartCycle.remove(player);
       overrideLastSeenCycle.remove(player);
       return false;
    }
@@ -1315,8 +1330,6 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
-      // Unknown while animated or graphiced:
-      // hide until a clean base-state model proves support.
       return true;
    }
 
@@ -1638,6 +1651,7 @@ public class VisibilityEnhancer extends Plugin
       overrideStartCycle.clear();
       overrideLastSeenCycle.clear();
       overrideForcedPlayers.clear();
+      lastCombatCycleMap.clear();
 
       for (Map.Entry<byte[], byte[]> entry : originalTransparencies.entrySet())
       {
@@ -1654,6 +1668,11 @@ public class VisibilityEnhancer extends Plugin
       playerTrackedTransparencies.clear();
       immunePlayers.clear();
       supportedPlayers.clear();
+
+      lastCriticalGraphicCycleMap.clear();
+      criticalGraphicPlayers.clear();
+      exemptPlayers.clear();
+      culledPlayers.clear();
    }
 
    private int clampAlpha(int opacityPercent)
