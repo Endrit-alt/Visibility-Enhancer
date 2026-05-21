@@ -39,6 +39,10 @@ public class VisibilityEnhancer extends Plugin
    private final Map<Player, Integer> lastCombatCycleMap = new HashMap<>();
    private static final int COMBAT_TIMEOUT_CYCLES = 300; // 10 game ticks of "memory"
 
+   // Tracks the exact game tick a player was last seen doing something combat-related
+   private final Map<Player, Integer> combatTimerMap = new HashMap<>();
+   private static final int COMBAT_TIMEOUT_TICKS = 16; // Mimics the 10-second OSRS combat timer
+
    @Inject
    private Client client;
 
@@ -404,6 +408,10 @@ public class VisibilityEnhancer extends Plugin
       if (event.getActor() instanceof Player)
       {
          Player p = (Player) event.getActor();
+
+         // --- NEW: They took damage, so they are in combat ---
+         combatTimerMap.put(p, client.getTickCount());
+
          if (config.othersTransparentPrayers() && ghostedPlayers.contains(p))
          {
             int amount = event.getHitsplat().getAmount();
@@ -464,6 +472,27 @@ public class VisibilityEnhancer extends Plugin
    }
 
    @Subscribe
+   public void onAnimationChanged(AnimationChanged event)
+   {
+      if (!isActive())
+      {
+         return;
+      }
+
+      if (event.getActor() instanceof Player)
+      {
+         Player p = (Player) event.getActor();
+         int anim = p.getAnimation();
+
+         // If the animation is not idle, and NOT a skilling/utility animation
+         if (anim != -1 && !EXEMPT_ANIMATIONS.contains(anim))
+         {
+            combatTimerMap.put(p, client.getTickCount());
+         }
+      }
+   }
+
+   @Subscribe
    public void onClientTick(ClientTick event)
    {
       if (!isActive())
@@ -485,10 +514,18 @@ public class VisibilityEnhancer extends Plugin
       }
 
       int currentCycle = client.getGameCycle();
+      int currentTick = client.getTickCount();
 
       for (Player p : playersToCheck)
       {
-         // 1. Critical Graphic Check
+         // --- 1. Combat Interaction Check ---
+         Actor target = p.getInteracting();
+         if (target != null && target.getCombatLevel() > 0)
+         {
+            combatTimerMap.put(p, currentTick);
+         }
+
+         // --- 2. Critical Graphic Check ---
          boolean activelyHasCriticalGraphic = false;
          int currentGraphic = p.getGraphic();
 
@@ -522,6 +559,7 @@ public class VisibilityEnhancer extends Plugin
             criticalGraphicPlayers.add(p);
          }
 
+         // --- 3. Forced Override Check ---
          Model model = p.getModel();
          boolean hasOverride = shouldForceOpaqueForOverride(p, model);
 
@@ -530,42 +568,16 @@ public class VisibilityEnhancer extends Plugin
             exemptPlayers.add(p);
          }
 
-         boolean activeCombatSignal = false;
-
-         Actor target = p.getInteracting();
-         if (target != null && target.getCombatLevel() > 0)
-         {
-            activeCombatSignal = true;
-         }
-
-         if (p.getHealthRatio() > -1)
-         {
-            activeCombatSignal = true;
-         }
-
-         int anim = p.getAnimation();
-         if (anim != -1 && !EXEMPT_ANIMATIONS.contains(anim))
-         {
-            activeCombatSignal = true;
-         }
-
-         if (activeCombatSignal)
-         {
-            lastCombatCycleMap.put(p, currentCycle);
-         }
-
-         // 3. Distance Math & 0% Cull Check
+         // --- 4. Distance Math & 0% Cull Check ---
          int opacity = getEffectiveOpacity(p);
 
          if (opacity == 0 && !exemptPlayers.contains(p))
          {
             culledPlayers.add(p);
          }
-
-
       }
 
-      // Rest of tick logic
+      // --- Rest of tick logic ---
       if (config.distanceBasedOpacity() && !peekHeld)
       {
          for (Player p : currentInRange)
@@ -680,6 +692,7 @@ public class VisibilityEnhancer extends Plugin
       exemptPlayers.remove(p);
       culledPlayers.remove(p);
       lastCombatCycleMap.remove(p);
+      combatTimerMap.remove(p);
    }
 
    @Subscribe
@@ -1092,15 +1105,14 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
-      Integer lastCombatCycle = lastCombatCycleMap.get(player);
-      if (lastCombatCycle == null)
+      Integer lastCombatTick = combatTimerMap.get(player);
+      if (lastCombatTick == null)
       {
          return false;
       }
 
-      // If they have done a combat action within the last 10 ticks (300 cycles),
-      // consider them fully in combat so they properly cull to 0%.
-      return (client.getGameCycle() - lastCombatCycle) <= COMBAT_TIMEOUT_CYCLES;
+      // If they attacked, got hit, or targeted an enemy within the last 16 ticks, they are in combat.
+      return (client.getTickCount() - lastCombatTick) <= COMBAT_TIMEOUT_TICKS;
    }
 
    private int getEffectiveOpacity(Player player)
@@ -1666,6 +1678,7 @@ public class VisibilityEnhancer extends Plugin
       criticalGraphicPlayers.clear();
       exemptPlayers.clear();
       culledPlayers.clear();
+      combatTimerMap.clear();
    }
 
    private int clampAlpha(int opacityPercent)
