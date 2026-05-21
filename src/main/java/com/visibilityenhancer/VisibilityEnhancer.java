@@ -41,7 +41,7 @@ public class VisibilityEnhancer extends Plugin
 
    // Tracks the exact game tick a player was last seen doing something combat-related
    private final Map<Player, Integer> combatTimerMap = new HashMap<>();
-   private static final int COMBAT_TIMEOUT_TICKS = 16; // Mimics the 10-second OSRS combat timer
+   private static final int COMBAT_TIMEOUT_TICKS = 32; // Mimics the 10-second OSRS combat timer
 
    @Inject
    private Client client;
