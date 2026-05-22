@@ -968,12 +968,34 @@ public class VisibilityEnhancer extends Plugin
             }
 
             Actor target = proj.getInteracting();
-            boolean isTargetingMeOrGround = (target == local || target == null);
             boolean isMine = myProjectiles.contains(proj);
 
+            // 1. Is it targeting you or the ground?
+            boolean isTargetingMeOrGround = (target == local || target == null);
+
+            // 2. Is it targeting a teammate in the splash-damage zone?
+            boolean isTargetingNearbyTeammate = false;
+            if (!isTargetingMeOrGround && target instanceof Player)
+            {
+               LocalPoint localLoc = local.getLocalLocation();
+               LocalPoint targetLoc = target.getLocalLocation();
+
+               if (localLoc != null && targetLoc != null)
+               {
+                  // 1 tile = 128 units. 256 units = 2 tiles.
+                  // If they are stacked or adjacent, this treats it as a threat to you.
+                  if (localLoc.distanceTo(targetLoc) <= 256)
+                  {
+                     isTargetingNearbyTeammate = true;
+                  }
+               }
+            }
+
+            // Combine them to know if we absolutely MUST see this projectile
+            boolean forceVisible = isTargetingMeOrGround || isTargetingNearbyTeammate;
             int currentState = arrayState.getOrDefault(trans, -1);
 
-            if (isTargetingMeOrGround)
+            if (forceVisible)
             {
                if (currentState < STATE_RESTORE)
                {
@@ -991,6 +1013,7 @@ public class VisibilityEnhancer extends Plugin
             }
             else
             {
+               // It's a teammate's projectile, OR a boss attacking a teammate far away. Fade it out.
                if (currentState < STATE_OTHERS)
                {
                   arrayState.put(trans, STATE_OTHERS);
@@ -1053,7 +1076,25 @@ public class VisibilityEnhancer extends Plugin
 
          Projectile proj = (Projectile) renderable;
          Actor target = proj.getInteracting();
-         return target == null || target == cachedLocalPlayer || myProjectiles.contains(proj);
+
+         if (target == null || target == cachedLocalPlayer || myProjectiles.contains(proj))
+         {
+            return true;
+         }
+
+         if (target instanceof Player)
+         {
+            LocalPoint localLoc = cachedLocalPlayer != null ? cachedLocalPlayer.getLocalLocation() : null;
+            LocalPoint targetLoc = target.getLocalLocation();
+
+            // Only draw if the teammate being targeted is within 2 tiles of you
+            if (localLoc != null && targetLoc != null && localLoc.distanceTo(targetLoc) <= 256)
+            {
+               return true;
+            }
+         }
+
+         return false;
       }
 
       if (renderable instanceof Player)
