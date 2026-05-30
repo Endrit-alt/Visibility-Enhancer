@@ -193,7 +193,9 @@ public class VisibilityEnhancer extends Plugin
            13210, // Scurrius
            5939, // Hueycotl
            15515, // Nightmare
-           13106 // Zalcano
+           13106, // Zalcano
+           15184 // Wardens p1
+
    );
 
 
