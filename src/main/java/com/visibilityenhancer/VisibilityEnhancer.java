@@ -186,12 +186,12 @@ public class VisibilityEnhancer extends Plugin
       }
    };
 
-   private static final Set<Integer> IGNORED_PROJECTILE_IDS = ImmutableSet.of(
-           2253, // Akkha Magic attack
-           2255, // Akkha Ranged attack (already solid, but safe to include)
-           2237, // Warden big orb
-           2238  // Warden small orb
-           // Add any other specific projectiles here
+   private static final Set<Integer> TRANS_NULL_IDS = ImmutableSet.of(
+           2253, 
+           2255,
+           2237,
+           2238
+
    );
 
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
@@ -1025,7 +1025,7 @@ public class VisibilityEnhancer extends Plugin
       {
          for (Projectile proj : client.getProjectiles())
          {
-            if (IGNORED_PROJECTILE_IDS.contains(proj.getId()))
+            if (TRANS_NULL_IDS.contains(proj.getId()))
             {
                continue; // Forces the plugin to skip it, just like trans == null
             }
