@@ -187,11 +187,10 @@ public class VisibilityEnhancer extends Plugin
    };
 
    private static final Set<Integer> TRANS_NULL_IDS = ImmutableSet.of(
-           2253, 
+           2253,
            2255,
            2237,
            2238
-
    );
 
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
@@ -691,12 +690,7 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
-
-      // --- Ownership Filter ---
-      // Boss attacks target Players. AoE attacks target the ground (null).
-      // If this projectile targets a player or the ground, it is impossible for
-      // it to be your PvM attack. This stops you from "stealing" boss projectiles
-      // when standing in melee range.
+      
       if (target == null || target instanceof Player)
       {
          return;
