@@ -24,6 +24,8 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.HotkeyListener;
+import net.runelite.client.events.PluginChanged;
+import net.runelite.client.plugins.PluginManager;
 
 @PluginDescriptor(
         name = "Visibility",
@@ -42,6 +44,11 @@ public class VisibilityEnhancer extends Plugin
    // Tracks the exact game tick a player was last seen doing something combat-related
    private final Map<Player, Integer> combatTimerMap = new HashMap<>();
    private static final int COMBAT_TIMEOUT_TICKS = 32; // Mimics the 10-second OSRS combat timer
+
+   @Inject
+   private PluginManager pluginManager;
+
+   private boolean isProjectileOverrideActive = false;
 
    @Inject
    private Client client;
@@ -81,6 +88,7 @@ public class VisibilityEnhancer extends Plugin
 
    private final Map<Player, int[]> originalEquipmentMap = new HashMap<>();
    private final Set<Projectile> myProjectiles = new HashSet<>();
+   private final Set<Projectile> forceOpaqueProjectiles = new HashSet<>();
    private final Map<byte[], byte[]> originalTransparencies = new WeakHashMap<>();
 
    private final Map<Player, Set<byte[]>> playerTrackedTransparencies = new WeakHashMap<>();
@@ -178,6 +186,14 @@ public class VisibilityEnhancer extends Plugin
       }
    };
 
+   private static final Set<Integer> IGNORED_PROJECTILE_IDS = ImmutableSet.of(
+           2253, // Akkha Magic attack
+           2255, // Akkha Ranged attack (already solid, but safe to include)
+           2237, // Warden big orb
+           2238  // Warden small orb
+           // Add any other specific projectiles here
+   );
+
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
            12613, // ToB Maiden
            13123, 13379, // ToB Sote
@@ -193,9 +209,8 @@ public class VisibilityEnhancer extends Plugin
            13210, // Scurrius
            5939, // Hueycotl
            15515, // Nightmare
-           13106, // Zalcano
-           15184 // Wardens p1
-
+           13106 // Zalcano
+           //15184 Wardens p1
    );
 
 
@@ -209,19 +224,19 @@ public class VisibilityEnhancer extends Plugin
                    408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428,
                    429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 420, 424, 426, 707, 708, 709, 710, 711, 712,
                    713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733,
-                  734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754,
-                  755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775,
+                   734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754,
+                   755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775,
                    776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796,
                    797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817,
                    818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838,
                    839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859,
                    860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880,
-                  881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901,
+                   881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901,
                    902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 931, 1062, 4071, 4177, 4426, 4427, 4428, 4429,
                    4462, 5061, 5063, 7642, 8457, 8458, 8459, 8460, 8461, 8462, 8463, 8464, 8465, 8466, 8467, 8468, 8469, 8470,
-                  8471, 8472, 8473, 8474, 8475, 8476, 8477, 8478, 8479, 8480, 8481, 8482, 8483, 8484, 8485, 8486, 8487, 8488,
-                  9848, 8970, 8972, 8973, 8974, 8975, 8976, 8977, 8978, 8979, 8980, 8981, 8982, 8983, 8985, 8987, 8993, 8995,
-                  8997, 8998, 8999, 9002, 9168, 9471, 9493, 9713, 9714, 9715, 9799, 11222, 11430, 11275, 12397) //opacity breakers
+                   8471, 8472, 8473, 8474, 8475, 8476, 8477, 8478, 8479, 8480, 8481, 8482, 8483, 8484, 8485, 8486, 8487, 8488,
+                   9848, 8970, 8972, 8973, 8974, 8975, 8976, 8977, 8978, 8979, 8980, 8981, 8982, 8983, 8985, 8987, 8993, 8995,
+                   8997, 8998, 8999, 9002, 9168, 9471, 9493, 9713, 9714, 9715, 9799, 11222, 11430, 11275, 12397) //opacity breakers
 
            .add(AnimationID.CONSUMING)
 
@@ -316,6 +331,20 @@ public class VisibilityEnhancer extends Plugin
       peekHeld = false;
       wasActive = false;
       currentRegionId = -1;
+
+      isProjectileOverrideActive = false;
+      if (pluginManager != null)
+      {
+         for (Plugin p : pluginManager.getPlugins())
+         {
+            if ("Projectile Override".equals(p.getName()))
+            {
+               // isPluginEnabled checks if it is currently active in the user's config
+               isProjectileOverrideActive = pluginManager.isPluginEnabled(p);
+               break;
+            }
+         }
+      }
    }
 
    @Override
@@ -335,6 +364,11 @@ public class VisibilityEnhancer extends Plugin
 
    public boolean isActive()
    {
+      if (client.getGameState() != GameState.LOGGED_IN)
+      {
+         return false;
+      }
+
       if (!pluginToggledOn)
       {
          return false;
@@ -603,7 +637,7 @@ public class VisibilityEnhancer extends Plugin
          }
       }
 
-      if (peekHeld || config.hideOthersProjectiles())
+      if (peekHeld || isHideOthersProjectilesEnabled())
       {
          for (Player p : ghostedPlayers)
          {
@@ -637,18 +671,38 @@ public class VisibilityEnhancer extends Plugin
 
       Projectile proj = event.getProjectile();
 
+      Player local = client.getLocalPlayer();
+      if (local == null)
+      {
+         return;
+      }
+
+      Actor target = proj.getTargetActor();
+
+      if (target == null
+              || isLocalPlayerTarget(target, local)
+              || isProjectileLandingNearLocal(proj, local)
+              || isProjectileMovedLandingNearLocal(event, local))
+      {
+         forceOpaqueProjectiles.add(proj);
+      }
+
       if (myProjectiles.contains(proj))
       {
          return;
       }
 
-      if (client.getGameCycle() > proj.getStartCycle() + 150)
+      // --- Ownership Filter ---
+      // Boss attacks target Players. AoE attacks target the ground (null).
+      // If this projectile targets a player or the ground, it is impossible for
+      // it to be your PvM attack. This stops you from "stealing" boss projectiles
+      // when standing in melee range.
+      if (target == null || target instanceof Player)
       {
          return;
       }
 
-      Player local = client.getLocalPlayer();
-      if (local == null)
+      if (client.getGameCycle() > proj.getStartCycle() + 150)
       {
          return;
       }
@@ -663,9 +717,20 @@ public class VisibilityEnhancer extends Plugin
       int dy = proj.getY1() - lp.getY();
       int distSq = (dx * dx) + (dy * dy);
 
+      // 192 units = 1.5 tiles
       if (distSq < (192 * 192) && local.getAnimation() != -1)
       {
          myProjectiles.add(proj);
+      }
+   }
+
+   @Subscribe
+   public void onPluginChanged(PluginChanged event)
+   {
+      if (event.getPlugin() != null && "Projectile Override".equals(event.getPlugin().getName()))
+      {
+         // isLoaded() returns true when the plugin starts, and false when it shuts down
+         isProjectileOverrideActive = event.isLoaded();
       }
    }
 
@@ -869,6 +934,7 @@ public class VisibilityEnhancer extends Plugin
       LocalPoint localLoc = local.getLocalLocation();
 
       myProjectiles.removeIf(p -> client.getGameCycle() >= p.getEndCycle());
+      forceOpaqueProjectiles.removeIf(p -> client.getGameCycle() >= p.getEndCycle());
 
       if (config.othersTransparentPrayers())
       {
@@ -949,14 +1015,21 @@ public class VisibilityEnhancer extends Plugin
       final int STATE_MINE = 1;
       final int STATE_RESTORE = 2;
 
+// Append the check to your skipProjectiles boolean
       boolean skipProjectiles = RESTRICTED_PROJECTILE_REGIONS.contains(currentRegionId)
               || client.getPlayers().size() <= 1
-              || client.getVarbitValue(Varbits.IN_RAID) == 1;
+              || client.getVarbitValue(Varbits.IN_RAID) == 1
+              || isProjectileOverrideActive; // <-- ADD THIS LINE
 
       if (!skipProjectiles)
       {
          for (Projectile proj : client.getProjectiles())
          {
+            if (IGNORED_PROJECTILE_IDS.contains(proj.getId()))
+            {
+               continue; // Forces the plugin to skip it, just like trans == null
+            }
+
             Model m = proj.getModel();
             if (m == null)
             {
@@ -969,35 +1042,16 @@ public class VisibilityEnhancer extends Plugin
                continue;
             }
 
-            Actor target = proj.getInteracting();
+            Actor target = proj.getTargetActor();
+            boolean isTargetingMeOrGround = target == null
+                    || isLocalPlayerTarget(target, local)
+                    || isProjectileLandingNearLocal(proj, local)
+                    || forceOpaqueProjectiles.contains(proj);
             boolean isMine = myProjectiles.contains(proj);
 
-            // 1. Is it targeting you or the ground?
-            boolean isTargetingMeOrGround = (target == local || target == null);
-
-            // 2. Is it targeting a teammate in the splash-damage zone?
-            boolean isTargetingNearbyTeammate = false;
-            if (!isTargetingMeOrGround && target instanceof Player)
-            {
-               LocalPoint localLoc = local.getLocalLocation();
-               LocalPoint targetLoc = target.getLocalLocation();
-
-               if (localLoc != null && targetLoc != null)
-               {
-                  // 1 tile = 128 units. 256 units = 2 tiles.
-                  // If they are stacked or adjacent, this treats it as a threat to you.
-                  if (localLoc.distanceTo(targetLoc) <= 256)
-                  {
-                     isTargetingNearbyTeammate = true;
-                  }
-               }
-            }
-
-            // Combine them to know if we absolutely MUST see this projectile
-            boolean forceVisible = isTargetingMeOrGround || isTargetingNearbyTeammate;
             int currentState = arrayState.getOrDefault(trans, -1);
 
-            if (forceVisible)
+            if (isTargetingMeOrGround)
             {
                if (currentState < STATE_RESTORE)
                {
@@ -1015,7 +1069,6 @@ public class VisibilityEnhancer extends Plugin
             }
             else
             {
-               // It's a teammate's projectile, OR a boss attacking a teammate far away. Fade it out.
                if (currentState < STATE_OTHERS)
                {
                   arrayState.put(trans, STATE_OTHERS);
@@ -1067,7 +1120,7 @@ public class VisibilityEnhancer extends Plugin
          return true;
       }
 
-      if (renderable instanceof Projectile && (peekHeld || config.hideOthersProjectiles()))
+      if (renderable instanceof Projectile && (peekHeld || isHideOthersProjectilesEnabled()))
       {
          if (RESTRICTED_PROJECTILE_REGIONS.contains(currentRegionId)
                  || client.getPlayers().size() <= 1
@@ -1077,26 +1130,12 @@ public class VisibilityEnhancer extends Plugin
          }
 
          Projectile proj = (Projectile) renderable;
-         Actor target = proj.getInteracting();
-
-         if (target == null || target == cachedLocalPlayer || myProjectiles.contains(proj))
-         {
-            return true;
-         }
-
-         if (target instanceof Player)
-         {
-            LocalPoint localLoc = cachedLocalPlayer != null ? cachedLocalPlayer.getLocalLocation() : null;
-            LocalPoint targetLoc = target.getLocalLocation();
-
-            // Only draw if the teammate being targeted is within 2 tiles of you
-            if (localLoc != null && targetLoc != null && localLoc.distanceTo(targetLoc) <= 256)
-            {
-               return true;
-            }
-         }
-
-         return false;
+         Actor target = proj.getTargetActor();
+         return target == null
+                 || isLocalPlayerTarget(target, cachedLocalPlayer)
+                 || isProjectileLandingNearLocal(proj, cachedLocalPlayer)
+                 || forceOpaqueProjectiles.contains(proj)
+                 || myProjectiles.contains(proj);
       }
 
       if (renderable instanceof Player)
@@ -1139,6 +1178,31 @@ public class VisibilityEnhancer extends Plugin
       }
 
       return true;
+   }
+
+   private boolean isLocalPlayerTarget(Actor target, Player local)
+   {
+      if (target == null || local == null)
+      {
+         return false;
+      }
+
+      if (target == local)
+      {
+         return true;
+      }
+
+      if (target instanceof Player)
+      {
+         return Objects.equals(target.getName(), local.getName());
+      }
+
+      return false;
+   }
+
+   private boolean isHideOthersProjectilesEnabled()
+   {
+      return config.hideOthersProjectiles() && !isProjectileOverrideActive;
    }
 
    private boolean isInCombat(Player player)
@@ -1335,6 +1399,57 @@ public class VisibilityEnhancer extends Plugin
       {
          restoreOpacity(player);
       }
+   }
+
+   private boolean isProjectileLandingNearLocal(Projectile proj, Player local)
+   {
+      if (proj == null || local == null)
+      {
+         return false;
+      }
+
+      LocalPoint localLoc = local.getLocalLocation();
+      WorldPoint targetWorldPoint = proj.getTargetPoint();
+
+      if (localLoc == null || targetWorldPoint == null)
+      {
+         return false;
+      }
+
+      LocalPoint targetPoint = LocalPoint.fromWorld(client, targetWorldPoint);
+
+      if (targetPoint == null)
+      {
+         return false;
+      }
+
+      int dx = targetPoint.getX() - localLoc.getX();
+      int dy = targetPoint.getY() - localLoc.getY();
+      int distSq = (dx * dx) + (dy * dy);
+
+      return distSq <= (192 * 192);
+   }
+
+   private boolean isProjectileMovedLandingNearLocal(ProjectileMoved event, Player local)
+   {
+      if (event == null || local == null)
+      {
+         return false;
+      }
+
+      LocalPoint localLoc = local.getLocalLocation();
+      LocalPoint targetPoint = event.getPosition();
+
+      if (localLoc == null || targetPoint == null)
+      {
+         return false;
+      }
+
+      int dx = targetPoint.getX() - localLoc.getX();
+      int dy = targetPoint.getY() - localLoc.getY();
+      int distSq = (dx * dx) + (dy * dy);
+
+      return distSq <= (192 * 192);
    }
 
    private boolean isOpacityUnsupported(Player player)
@@ -1695,6 +1810,7 @@ public class VisibilityEnhancer extends Plugin
       currentInRange.clear();
       originalEquipmentMap.clear();
       myProjectiles.clear();
+      forceOpaqueProjectiles.clear();
       customHitsplats.clear();
       overrideStartCycle.clear();
       overrideLastSeenCycle.clear();
