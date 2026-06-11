@@ -292,7 +292,10 @@ public class VisibilityEnhancer extends Plugin
    public static final Set<Integer> THRALL_IDS = ImmutableSet.of(
            NpcID.ARCEUUS_THRALL_GHOST_LESSER, NpcID.ARCEUUS_THRALL_SKELETON_LESSER, NpcID.ARCEUUS_THRALL_ZOMBIE_LESSER,
            NpcID.ARCEUUS_THRALL_GHOST_SUPERIOR, NpcID.ARCEUUS_THRALL_SKELETON_SUPERIOR, NpcID.ARCEUUS_THRALL_ZOMBIE_SUPERIOR,
-           NpcID.ARCEUUS_THRALL_GHOST_GREATER, NpcID.ARCEUUS_THRALL_SKELETON_GREATER, NpcID.ARCEUUS_THRALL_ZOMBIE_GREATER
+           NpcID.ARCEUUS_THRALL_GHOST_GREATER, NpcID.ARCEUUS_THRALL_SKELETON_GREATER, NpcID.ARCEUUS_THRALL_ZOMBIE_GREATER,
+           15703,
+           15706,
+           15709
    );
 
    // Whitelist for critical SpotAnims/Graphics (the visual effects themselves)
@@ -690,7 +693,7 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
-      
+
       if (target == null || target instanceof Player)
       {
          return;
