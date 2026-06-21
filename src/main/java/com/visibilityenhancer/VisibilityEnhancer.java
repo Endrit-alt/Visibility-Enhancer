@@ -187,17 +187,15 @@ public class VisibilityEnhancer extends Plugin
    };
 
    private static final Set<Integer> TRANS_NULL_IDS = ImmutableSet.of(
-           2253,
-           2255,
-           2237,
-           2238
+           2253, 2255, 2237, 2238,
+           1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598
    );
 
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
-           12613, // ToB Maiden
-           13123, 13379, // ToB Sote
-           12612, // ToB Xarpus
-           12611, // ToB Verzik
+           //12613, // ToB Maiden
+           //13123, 13379, // ToB Sote
+           //12612, // ToB Xarpus
+           //12611, // ToB Verzik
            14164, // ToA Kephri
            15188, // ToA Ba-Ba
            12889, // CoX Olm
@@ -694,6 +692,11 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
+      // --- Ownership Filter ---
+      // Boss attacks target Players. AoE attacks target the ground (null).
+      // If this projectile targets a player or the ground, it is impossible for
+      // it to be your PvM attack. This stops you from "stealing" boss projectiles
+      // when standing in melee range.
       if (target == null || target instanceof Player)
       {
          return;
