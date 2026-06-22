@@ -694,7 +694,12 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
-      
+
+      // --- Ownership Filter ---
+      // Boss attacks target Players. AoE attacks target the ground (null).
+      // If this projectile targets a player or the ground, it is impossible for
+      // it to be your PvM attack. This stops you from "stealing" boss projectiles
+      // when standing in melee range.
       if (target == null || target instanceof Player)
       {
          return;
@@ -1146,6 +1151,14 @@ public class VisibilityEnhancer extends Plugin
       {
          Player player = (Player) renderable;
 
+         // Peek Through (Hold): show only yourself
+         Player local = client.getLocalPlayer();
+
+         if (peekHeld && player != client.getLocalPlayer())
+         {
+            return false;
+         }
+
          // --- Fast O(1) Absolute Culling Check ---
          if (!drawingUI && culledPlayers.contains(player))
          {
@@ -1310,6 +1323,11 @@ public class VisibilityEnhancer extends Plugin
 
       if (peekHeld)
       {
+         if (player == local)
+         {
+            return config.selfClearGround() ? 100 : config.selfOpacity();
+         }
+
          return 0;
       }
 

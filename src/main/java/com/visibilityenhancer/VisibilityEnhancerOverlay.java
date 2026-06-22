@@ -157,7 +157,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 		// Self outlines
 		HighlightStyle selfStyle = config.highlightSelf();
-		if (local != null && selfStyle != HighlightStyle.NONE && !plugin.isPeekHeld())
+		if (local != null && selfStyle != HighlightStyle.NONE)
 		{
 			Model localModel = local.getModel();
 			if (localModel == null || localModel.getOverrideAmount() == 0)
