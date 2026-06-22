@@ -190,8 +190,8 @@ public class VisibilityEnhancer extends Plugin
    };
 
    private static final Set<Integer> TRANS_NULL_IDS = ImmutableSet.of(
-           2253, 2255, 2237, 2238,
-           1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598
+           2204, 2206, 2208, 2224, 2241,  2253, 2255, 2237, 2238, 2244, //1
+           1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598 //2
    );
 
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
@@ -199,8 +199,9 @@ public class VisibilityEnhancer extends Plugin
            //13123, 13379, // ToB Sote
            //12612, // ToB Xarpus
            //12611, // ToB Verzik
+           //15188, // ToA Ba-Ba
+           //15184 Wardens p1
            14164, // ToA Kephri
-           15188, // ToA Ba-Ba
            12889, // CoX Olm
            11601, // Nex
            9043,  // Inferno
@@ -210,7 +211,6 @@ public class VisibilityEnhancer extends Plugin
            5939, // Hueycotl
            15515, // Nightmare
            13106 // Zalcano
-           //15184 Wardens p1
    );
 
 
