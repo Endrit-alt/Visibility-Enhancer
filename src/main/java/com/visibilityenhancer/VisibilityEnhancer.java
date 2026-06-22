@@ -48,6 +48,9 @@ public class VisibilityEnhancer extends Plugin
    @Inject
    private PluginManager pluginManager;
 
+   @Inject
+   private ConfigManager configManager;
+
    private boolean isProjectileOverrideActive = false;
 
    @Inject
@@ -187,15 +190,15 @@ public class VisibilityEnhancer extends Plugin
    };
 
    private static final Set<Integer> TRANS_NULL_IDS = ImmutableSet.of(
-           2253, 2255, 2237, 2238
-           //1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598
+           2253, 2255, 2237, 2238,
+           1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598
    );
 
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
-           12613, // ToB Maiden
-           13123, 13379, // ToB Sote
-           12612, // ToB Xarpus
-           12611, // ToB Verzik
+           //12613, // ToB Maiden
+           //13123, 13379, // ToB Sote
+           //12612, // ToB Xarpus
+           //12611, // ToB Verzik
            14164, // ToA Kephri
            15188, // ToA Ba-Ba
            12889, // CoX Olm
@@ -691,7 +694,7 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
-
+      
       if (target == null || target instanceof Player)
       {
          return;
@@ -1014,7 +1017,7 @@ public class VisibilityEnhancer extends Plugin
       boolean skipProjectiles = RESTRICTED_PROJECTILE_REGIONS.contains(currentRegionId)
               || client.getPlayers().size() <= 1
               || client.getVarbitValue(Varbits.IN_RAID) == 1
-              || isProjectileOverrideActive; // <-- ADD THIS LINE
+              || isProjectileOverrideActiveForCurrentArea();
 
       if (!skipProjectiles)
       {
@@ -1117,6 +1120,13 @@ public class VisibilityEnhancer extends Plugin
 
       if (renderable instanceof Projectile && (peekHeld || isHideOthersProjectilesEnabled()))
       {
+         Projectile proj = (Projectile) renderable;
+
+         if (TRANS_NULL_IDS.contains(proj.getId()))
+         {
+            return true;
+         }
+
          if (RESTRICTED_PROJECTILE_REGIONS.contains(currentRegionId)
                  || client.getPlayers().size() <= 1
                  || client.getVarbitValue(Varbits.IN_RAID) == 1)
@@ -1124,7 +1134,6 @@ public class VisibilityEnhancer extends Plugin
             return true;
          }
 
-         Projectile proj = (Projectile) renderable;
          Actor target = proj.getTargetActor();
          return target == null
                  || isLocalPlayerTarget(target, cachedLocalPlayer)
@@ -1197,7 +1206,81 @@ public class VisibilityEnhancer extends Plugin
 
    private boolean isHideOthersProjectilesEnabled()
    {
-      return config.hideOthersProjectiles() && !isProjectileOverrideActive;
+      return config.hideOthersProjectiles() && !isProjectileOverrideActiveForCurrentArea();
+   }
+
+   private boolean isProjectileOverrideActiveForCurrentArea()
+   {
+      if (!isProjectileOverrideActive || configManager == null)
+      {
+         return false;
+      }
+
+      String[] keys = getProjectileOverrideKeysForCurrentRegion();
+
+      for (String key : keys)
+      {
+         if (isProjectileOverrideKeyNonDefault(key))
+         {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   private boolean isProjectileOverrideKeyNonDefault(String key)
+   {
+      String value = configManager.getConfiguration("projectileoverride", key);
+
+      if (value == null)
+      {
+         return false;
+      }
+
+      return !value.equalsIgnoreCase("default")
+              && !value.equalsIgnoreCase("DEFAULT");
+   }
+
+   private String[] getProjectileOverrideKeysForCurrentRegion()
+   {
+      switch (currentRegionId)
+      {
+         case 15700: // ToA Zebak
+            return new String[]{"zebak", "zebak-rocks"};
+
+         case 14676: // ToA Akkha
+            return new String[]{"akkha"};
+
+         case 15184: // ToA Wardens
+         case 15696:
+            return new String[]{"wardens", "wardens-divine"};
+
+         case 12889: // CoX Olm
+            return new String[]{"olm"};
+
+         case 13123: // ToB Sotetseg
+         case 13379:
+            return new String[]{"sotetseg"};
+
+         case 9043: // Inferno
+            return new String[]{"inferno"};
+
+         case 14180: // Doom of Mokhaiotl
+            return new String[]{"dom", "dom-rocks"};
+
+         case 13210: // Scurrius
+            return new String[]{"scurrius"};
+
+         case 5939: // Hueycoatl
+            return new String[]{"hueycoatl"};
+
+         case 7216: // Fortis Colosseum, manticore projectiles
+            return new String[]{"manticore"};
+
+         default:
+            return new String[0];
+      }
    }
 
    private boolean isInCombat(Player player)
