@@ -37,6 +37,7 @@ public class VisibilityEnhancer extends Plugin
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
    private static final int CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES = 120;
+   private static final int COX_MAX_AFFECTED_PLAYERS = 100;
 
    private final Map<Player, Integer> lastCombatCycleMap = new HashMap<>();
    private static final int COMBAT_TIMEOUT_CYCLES = 300; // 10 game ticks of "memory"
@@ -694,7 +695,12 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
-      
+
+      // --- Ownership Filter ---
+      // Boss attacks target Players. AoE attacks target the ground (null).
+      // If this projectile targets a player or the ground, it is impossible for
+      // it to be your PvM attack. This stops you from "stealing" boss projectiles
+      // when standing in melee range.
       if (target == null || target instanceof Player)
       {
          return;
@@ -883,7 +889,9 @@ public class VisibilityEnhancer extends Plugin
          }
       }
 
-      if (inRange.size() > config.maxAffectedPlayers())
+      int maxAffectedPlayers = getMaxAffectedPlayers();
+
+      if (inRange.size() > maxAffectedPlayers)
       {
          inRange.sort((p1, p2) ->
          {
@@ -901,12 +909,27 @@ public class VisibilityEnhancer extends Plugin
             return Integer.compare(dist1, dist2);
          });
 
-         currentInRange.addAll(inRange.subList(0, config.maxAffectedPlayers()));
+         currentInRange.addAll(inRange.subList(0, maxAffectedPlayers));
       }
       else
       {
          currentInRange.addAll(inRange);
       }
+   }
+
+   private int getMaxAffectedPlayers()
+   {
+      if (isInChambersOfXeric())
+      {
+         return COX_MAX_AFFECTED_PLAYERS;
+      }
+
+      return config.maxAffectedPlayers();
+   }
+
+   private boolean isInChambersOfXeric()
+   {
+      return currentRegionId == 12889 || client.getVarbitValue(Varbits.IN_RAID) == 1;
    }
 
    @Subscribe
