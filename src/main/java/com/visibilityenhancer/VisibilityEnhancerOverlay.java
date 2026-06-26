@@ -252,7 +252,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		// Stack warnings should render independently of highlightOthers
 		renderStackWarnings(graphics);
 
-		boolean othersCustomPrayers = config.othersTransparentPrayers();
+		boolean othersCustomPrayers = config.othersTransparentPrayers() && !plugin.isPeekHeld();
 
 		if (othersCustomPrayers)
 		{
