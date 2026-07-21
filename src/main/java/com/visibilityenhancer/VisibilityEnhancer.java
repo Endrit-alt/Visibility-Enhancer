@@ -696,11 +696,6 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
-      // --- Ownership Filter ---
-      // Boss attacks target Players. AoE attacks target the ground (null).
-      // If this projectile targets a player or the ground, it is impossible for
-      // it to be your PvM attack. This stops you from "stealing" boss projectiles
-      // when standing in melee range.
       if (target == null || target instanceof Player)
       {
          return;
