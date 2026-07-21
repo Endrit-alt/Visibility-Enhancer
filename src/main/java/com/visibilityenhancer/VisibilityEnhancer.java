@@ -37,7 +37,7 @@ public class VisibilityEnhancer extends Plugin
    private static final int OVERRIDE_OPAQUE_DELAY_CYCLES = 2;
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
    private static final int CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES = 120;
-   private static final int COX_MAX_AFFECTED_PLAYERS = 100;
+   private static final int COX_MAX_AFFECTED_PLAYERS = 16;
 
    private final Map<Player, Integer> lastCombatCycleMap = new HashMap<>();
    private static final int COMBAT_TIMEOUT_CYCLES = 300; // 10 game ticks of "memory"
@@ -695,7 +695,12 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
-      
+
+      // --- Ownership Filter ---
+      // Boss attacks target Players. AoE attacks target the ground (null).
+      // If this projectile targets a player or the ground, it is impossible for
+      // it to be your PvM attack. This stops you from "stealing" boss projectiles
+      // when standing in melee range.
       if (target == null || target instanceof Player)
       {
          return;
