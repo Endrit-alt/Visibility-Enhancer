@@ -211,7 +211,14 @@ public class VisibilityEnhancer extends Plugin
            13210, // Scurrius
            5939, // Hueycotl
            15515, // Nightmare
-           13106 // Zalcano
+            13106 // Zalcano
+   );
+
+   // Keep other players faintly rendered in rooms where their Follow option is mechanically useful.
+   // This only supplies a 1% minimum for an otherwise 0% result; forced model overrides remain authoritative.
+   private static final Set<Integer> MINIMUM_OTHER_PLAYER_OPACITY_REGIONS = ImmutableSet.of(
+           12611, // ToB Verzik
+           15186  // ToA Path of Apmeken (Monkey Puzzle)
    );
 
 
@@ -410,6 +417,7 @@ public class VisibilityEnhancer extends Plugin
             return config.toaKephri();
          case 14676:
             return config.toaAkkha();
+         case 15186: // Path of Apmeken (Monkey Puzzle)
          case 15188:
             return config.toaBaba();
          case 15184:
@@ -1380,6 +1388,12 @@ public class VisibilityEnhancer extends Plugin
       if (calculatedOpacity == 0)
       {
          if (criticalGraphicPlayers.contains(player))
+         {
+            return 1;
+         }
+
+         // Preserve interaction options such as Follow in rooms that require other players to remain targetable.
+         if (!isLocal && MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId))
          {
             return 1;
          }
