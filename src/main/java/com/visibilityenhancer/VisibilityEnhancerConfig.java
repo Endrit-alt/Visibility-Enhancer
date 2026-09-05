@@ -10,7 +10,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Opacity & Range",
 			description = "Control how transparent players and projectiles appear.",
-			position = 1
+			position = 1,
+			closedByDefault = true
 	)
 	String opacitySection = "opacitySection";
 
@@ -71,7 +72,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Proximity Fading",
 			description = "Settings for making players fade in or out dynamically based on distance.",
-			position = 5
+			position = 5,
+			closedByDefault = true
 	)
 	String proximityFadingSection = "proximityFadingSection";
 
@@ -109,7 +111,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Hotkeys",
 			description = "Hotkey settings for the plugin.",
-			position = 8
+			position = 8,
+			closedByDefault = true
 	)
 	String hotkeySection = "hotkeySection";
 
@@ -146,7 +149,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Visibility Extras",
 			description = "Ground view filters and projectile cleanup.",
-			position = 10
+			position = 10,
+			closedByDefault = true
 	)
 	String extrasSection = "extrasSection";
 
@@ -260,7 +264,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Stack Warnings",
 			description = "Visual warnings for multiple players standing on the same tile.",
-			position = 15
+			position = 15,
+			closedByDefault = true
 	)
 	String stackSection = "stackSection";
 
@@ -345,7 +350,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Highlights",
 			description = "Settings for player outlines and floor tiles.",
-			position = 20
+			position = 20,
+			closedByDefault = true
 	)
 	String outlineSection = "outlineSection";
 
@@ -420,7 +426,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Highlight Style",
 			description = "Visual aesthetics of the highlights (Global settings).",
-			position = 30
+			position = 30,
+			closedByDefault = true
 	)
 	String styleSection = "styleSection";
 
@@ -515,7 +522,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigSection(
 			name = "Area Filtering",
 			description = "Automatically enable/disable the plugin based on your location.",
-			position = 50
+			position = 50,
+			closedByDefault = true
 	)
 	String areaFilteringSection = "areaFilteringSection";
 
@@ -530,7 +538,7 @@ public interface VisibilityEnhancerConfig extends Config
 
 
 	// --- THEATRE OF BLOOD ---
-	@ConfigSection(name = "Theatre of Blood", description = "ToB Rooms", position = 51)
+	@ConfigSection(name = "Theatre of Blood", description = "ToB Rooms", position = 51, closedByDefault = true)
 	String tobSection = "tobSection";
 
 	@ConfigItem(keyName = "tobMaiden", name = "Maiden", section = tobSection, position = 1, description = "Enable in Maiden room")
@@ -553,7 +561,7 @@ public interface VisibilityEnhancerConfig extends Config
 
 
 	// --- TOMBS OF AMASCUT ---
-	@ConfigSection(name = "Tombs of Amascut", description = "ToA Rooms", position = 52)
+	@ConfigSection(name = "Tombs of Amascut", description = "ToA Rooms", position = 52, closedByDefault = true)
 	String toaSection = "toaSection";
 
 	@ConfigItem(keyName = "toaZebak", name = "Zebak", section = toaSection, position = 1, description = "Enable in Zebak room")
@@ -573,7 +581,7 @@ public interface VisibilityEnhancerConfig extends Config
 
 
 	// --- CHAMBERS OF XERIC ---
-	@ConfigSection(name = "Chambers of Xeric", description = "CoX Rooms", position = 53)
+	@ConfigSection(name = "Chambers of Xeric", description = "CoX Rooms", position = 53, closedByDefault = true)
 	String coxSection = "coxSection";
 
 	@ConfigItem(keyName = "coxOlm", name = "The Great Olm", section = coxSection, position = 1, description = "Static region check for Olm.")
@@ -583,7 +591,7 @@ public interface VisibilityEnhancerConfig extends Config
 	default boolean coxRest() { return true; }
 
 	// --- OTHER BOSSES ---
-	@ConfigSection(name = "Other Bosses", description = "Other Boss Rooms", position = 54)
+	@ConfigSection(name = "Other Bosses", description = "Other Boss Rooms", position = 54, closedByDefault = true)
 	String otherSection = "otherSection";
 
 	@ConfigItem(keyName = "otherFortisColosseum", name = "Fortis Colosseum", section = otherSection, position = 1, description = "Enable in the Fortis Colosseum arena")
