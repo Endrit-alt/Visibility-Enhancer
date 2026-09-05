@@ -211,7 +211,14 @@ public class VisibilityEnhancer extends Plugin
            13210, // Scurrius
            5939, // Hueycotl
            15515, // Nightmare
-           13106 // Zalcano
+            13106 // Zalcano
+   );
+
+   // Keep other players faintly rendered in rooms where their Follow option is mechanically useful.
+   // This only supplies a 1% minimum for an otherwise 0% result; forced model overrides remain authoritative.
+   private static final Set<Integer> MINIMUM_OTHER_PLAYER_OPACITY_REGIONS = ImmutableSet.of(
+           12611, // ToB Verzik
+           15186  // ToA Path of Apmeken (Monkey Puzzle)
    );
 
 
@@ -410,6 +417,7 @@ public class VisibilityEnhancer extends Plugin
             return config.toaKephri();
          case 14676:
             return config.toaAkkha();
+         case 15186: // Path of Apmeken (Monkey Puzzle)
          case 15188:
             return config.toaBaba();
          case 15184:
@@ -558,9 +566,10 @@ public class VisibilityEnhancer extends Plugin
 
       for (Player p : playersToCheck)
       {
-         // --- 1. Combat Interaction Check ---
+         // Player interactions also include Follow and Trade. Only NPC targets
+         // count here; player combat is still detected by animations and hitsplats.
          Actor target = p.getInteracting();
-         if (target != null && target.getCombatLevel() > 0)
+         if (target instanceof NPC && target.getCombatLevel() > 0)
          {
             combatTimerMap.put(p, currentTick);
          }
@@ -643,23 +652,29 @@ public class VisibilityEnhancer extends Plugin
 
       if (peekHeld || isHideOthersProjectilesEnabled())
       {
+         List<Integer> spotAnimKeysToRemove = new ArrayList<>();
          for (Player p : ghostedPlayers)
          {
-            int currentGraphic = p.getGraphic();
-            if (currentGraphic != -1 && !CRITICAL_SPOTANIMS.contains(currentGraphic))
+            IterableHashTable<ActorSpotAnim> spotAnims = p.getSpotAnims();
+            if (spotAnims == null)
             {
-               p.setGraphic(-1);
+               continue;
             }
 
-            if (p.getSpotAnims() != null)
+            spotAnimKeysToRemove.clear();
+            for (ActorSpotAnim spotAnim : spotAnims)
             {
-               for (ActorSpotAnim spotAnim : p.getSpotAnims())
+               if (!CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
                {
-                  if (!CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
-                  {
-                     p.removeSpotAnim(spotAnim.getId());
-                  }
+                  // getId identifies the effect; getHash identifies its actor-table entry.
+                  spotAnimKeysToRemove.add((int) spotAnim.getHash());
                }
+            }
+
+            // Do not mutate the spot-animation table while iterating it.
+            for (int key : spotAnimKeysToRemove)
+            {
+               p.removeSpotAnim(key);
             }
          }
       }
@@ -1178,7 +1193,8 @@ public class VisibilityEnhancer extends Plugin
             return false;
          }
 
-         if (!drawingUI && fallbackHiddenPlayers.contains(player))
+         // A mechanic or interaction floor may have activated since fallback was cached.
+         if (!drawingUI && fallbackHiddenPlayers.contains(player) && shouldHideWithFallback(player))
          {
             return false;
          }
@@ -1344,6 +1360,12 @@ public class VisibilityEnhancer extends Plugin
          return 0;
       }
 
+      // Boss overrides take precedence over normal opacity and the 1% floors.
+      if (shouldForceOpaqueForOverride(player, player.getModel()))
+      {
+         return 100;
+      }
+
       boolean isLocal = (player == local);
       int baseOpacity = isLocal ?
               (config.selfClearGround() ? 100 : config.selfOpacity()) :
@@ -1377,21 +1399,19 @@ public class VisibilityEnhancer extends Plugin
       }
 
       // Check exceptions if they are dropping to 0% opacity
-      if (calculatedOpacity == 0)
+      if (calculatedOpacity == 0 && shouldKeepVisibleAtZeroOpacity(player))
       {
-         if (criticalGraphicPlayers.contains(player))
-         {
-            return 1;
-         }
-
-         // If it's another player and they are NOT in combat, force 1% so they aren't fully culled
-         if (!isLocal && !isInCombat(player))
-         {
-            return 1;
-         }
+         return 1;
       }
 
       return calculatedOpacity;
+   }
+
+   private boolean shouldKeepVisibleAtZeroOpacity(Player player)
+   {
+      return criticalGraphicPlayers.contains(player)
+              || (player != client.getLocalPlayer()
+              && (MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId) || !isInCombat(player)));
    }
 
    private void forceOpacityUpdate()
@@ -1451,6 +1471,8 @@ public class VisibilityEnhancer extends Plugin
 
          if (overrideForcedPlayers.contains(player))
          {
+            // The grace period starts at the last observation, not initial activation.
+            overrideLastSeenCycle.put(player, currentCycle);
             return true;
          }
 
@@ -1617,8 +1639,11 @@ public class VisibilityEnhancer extends Plugin
       }
 
       int opacity = getEffectiveOpacity(player);
-      if (opacity >= 100)
+      if (opacity >= 100 || criticalGraphicPlayers.contains(player)
+              || (opacity == 1 && MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId)))
       {
+         // Preserve mechanic visibility and Follow in exception rooms. The ordinary
+         // out-of-combat 1% floor must not bypass hiding an unsupported model.
          fallbackHiddenPlayers.remove(player);
          return false;
       }
@@ -1823,6 +1848,13 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
+      // Never let an unsupported-model early return bypass an active boss override.
+      if (shouldForceOpaqueForOverride(p, model))
+      {
+         restoreOpacity(p);
+         return;
+      }
+
       byte[] trans = model.getFaceTransparencies();
 
       boolean isBaseState = (p.getAnimation() == -1 && p.getGraphic() == -1);
@@ -1845,12 +1877,6 @@ public class VisibilityEnhancer extends Plugin
          {
             return;
          }
-      }
-
-      if (shouldForceOpaqueForOverride(p, model))
-      {
-         restoreOpacity(p);
-         return;
       }
 
       int alpha = clampAlpha(opacityPercent);
