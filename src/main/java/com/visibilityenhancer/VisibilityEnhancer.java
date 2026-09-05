@@ -1640,9 +1640,10 @@ public class VisibilityEnhancer extends Plugin
 
       int opacity = getEffectiveOpacity(player);
       if (opacity >= 100 || criticalGraphicPlayers.contains(player)
-              || (opacity == 1 && shouldKeepVisibleAtZeroOpacity(player)))
+              || (opacity == 1 && MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId)))
       {
-         // Unsupported models may remain opaque, but must not lose mechanic visibility or Follow.
+         // Preserve mechanic visibility and Follow in exception rooms. The ordinary
+         // out-of-combat 1% floor must not bypass hiding an unsupported model.
          fallbackHiddenPlayers.remove(player);
          return false;
       }
