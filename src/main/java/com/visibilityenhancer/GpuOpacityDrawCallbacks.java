@@ -1,6 +1,9 @@
 package com.visibilityenhancer;
 
 import java.util.function.BiFunction;
+import java.util.function.BiPredicate;
+import java.util.function.BooleanSupplier;
+import java.util.Set;
 import lombok.experimental.Delegate;
 import net.runelite.api.GameObject;
 import net.runelite.api.Model;
@@ -28,17 +31,52 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
    {
       void drawTemp(Projection projection, Scene scene, GameObject object, Model model,
                     int orientation, int x, int y, int z);
+
+      void preSceneDraw(Scene scene, Projection projection, float cameraX, float cameraY, float cameraZ,
+                        float cameraPitch, float cameraYaw, int minLevel, int level, int maxLevel, Set<Integer> hideRoofIds);
+
+      void postSceneDraw(Scene scene);
    }
 
    @Delegate(excludes = TempDraw.class)
    private final DrawCallbacks delegate;
 
    private final BiFunction<Renderable, Model, Model> prepareModel;
+   private final SolidGpuCompositor solid;
 
    GpuOpacityDrawCallbacks(DrawCallbacks delegate, BiFunction<Renderable, Model, Model> prepareModel)
    {
+      this(delegate, prepareModel, () -> false, (scene, object) -> true);
+   }
+
+   GpuOpacityDrawCallbacks(DrawCallbacks delegate, BiFunction<Renderable, Model, Model> prepareModel,
+                           BooleanSupplier solidEnabled, BiPredicate<Scene, GameObject> drawObject)
+   {
       this.delegate = delegate;
       this.prepareModel = prepareModel;
+      // No HD GL calls or GPU subclasses with unknown scene-program contracts.
+      solid = delegate.getClass() == GpuPlugin.class ? new SolidGpuCompositor(solidEnabled, drawObject) : null;
+   }
+
+   void close()
+   {
+      if (solid != null) solid.close();
+   }
+
+   @Override
+   public void preSceneDraw(Scene scene, Projection projection, float cameraX, float cameraY, float cameraZ,
+                            float cameraPitch, float cameraYaw, int minLevel, int level, int maxLevel, Set<Integer> hideRoofIds)
+   {
+      delegate.preSceneDraw(scene, projection, cameraX, cameraY, cameraZ, cameraPitch, cameraYaw,
+              minLevel, level, maxLevel, hideRoofIds);
+      if (solid != null) solid.begin(scene);
+   }
+
+   @Override
+   public void postSceneDraw(Scene scene)
+   {
+      if (solid != null) solid.finish(scene);
+      delegate.postSceneDraw(scene);
    }
 
    DrawCallbacks getDelegate()
@@ -61,6 +99,7 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
       Model prepared = object == null ? model : prepareModel.apply(object.getRenderable(), model);
       if (prepared != null)
       {
+         if (solid != null && solid.submit(projection, scene, object, model, prepared, orientation, x, y, z)) return;
          delegate.drawTemp(projection, scene, object, prepared, orientation, x, y, z);
       }
    }

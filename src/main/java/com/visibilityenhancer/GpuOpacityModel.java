@@ -24,6 +24,12 @@ final class GpuOpacityModel implements Model
    private Model delegate;
 
    private byte[] transparencies = new byte[0];
+   private int targetAlpha;
+
+   int getTargetAlpha()
+   {
+      return targetAlpha;
+   }
 
    Model update(Model model, int alpha)
    {
@@ -42,6 +48,7 @@ final class GpuOpacityModel implements Model
       byte[] original = model.getFaceTransparencies();
       short[] textures = hideHdCapeTextures ? model.getFaceTextures() : null;
       int target = Math.max(0, Math.min(255, alpha));
+      targetAlpha = target;
       for (int i = 0; i < faceCount; i++)
       {
          int nativeAlpha = original != null && i < original.length ? original[i] & 0xff : 0;

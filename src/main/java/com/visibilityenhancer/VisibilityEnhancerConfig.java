@@ -75,6 +75,15 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default String npcOpacityInclusions() { return "Sotetseg,"; }
 
+	@ConfigItem(
+			keyName = "disableSolidTransparency",
+			name = "Disable Solid Transparency",
+			position = 10,
+			section = opacitySection,
+			description = "Use ordinary transparency for lower GPU load. Normal GPU only."
+	)
+	default boolean disableSolidTransparency() { return false; }
+
 	@Range(min = 1, max = 50)
 	@ConfigItem(
 			keyName = "proximityRange",
@@ -98,10 +107,10 @@ public interface VisibilityEnhancerConfig extends Config
 
 	@ConfigItem(
 			keyName = "ignoreFriends",
-			name = "Ignore Friends",
+			name = "Keep Friends Visible",
 			position = 5,
 			section = opacitySection,
-			description = "Prevents friends from being affected/transparent"
+			description = "Exclude friends from player opacity effects."
 	)
 	default boolean ignoreFriends() { return false; }
 

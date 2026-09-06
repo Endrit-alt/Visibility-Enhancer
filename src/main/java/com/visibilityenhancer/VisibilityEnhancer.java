@@ -18,6 +18,7 @@ import net.runelite.api.kit.KitType;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.callback.Hooks;
+import net.runelite.client.callback.RenderCallbackManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -75,6 +76,9 @@ public class VisibilityEnhancer extends Plugin
 
    @Inject
    private Hooks hooks;
+
+   @Inject
+   private RenderCallbackManager renderCallbackManager;
 
    @Inject
    private KeyManager keyManager;
@@ -1871,6 +1875,7 @@ public class VisibilityEnhancer extends Plugin
       }
 
       // Never replace an unrelated renderer or another plugin's callback wrapper.
+      if (gpuDrawCallbacks != null) gpuDrawCallbacks.close();
       gpuDrawCallbacks = null;
       gpuPlayerModels.clear();
       gpuNpcModels.clear();
@@ -1892,7 +1897,9 @@ public class VisibilityEnhancer extends Plugin
          restoreOpacity(player);
       }
 
-      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuModel);
+      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuModel,
+              () -> gpuOpacityEnabled && !config.disableSolidTransparency(),
+              (scene, object) -> renderCallbackManager != null && renderCallbackManager.drawObject(scene, object));
       client.setDrawCallbacks(gpuDrawCallbacks);
       log.debug("Render-time player/NPC opacity enabled for {}", current.getClass().getName());
    }
@@ -1907,6 +1914,7 @@ public class VisibilityEnhancer extends Plugin
          }
          client.setDrawCallbacks(gpuDrawCallbacks.getDelegate());
       }
+      if (gpuDrawCallbacks != null) gpuDrawCallbacks.close();
       gpuDrawCallbacks = null;
       gpuPlayerModels.clear();
       gpuNpcModels.clear();
