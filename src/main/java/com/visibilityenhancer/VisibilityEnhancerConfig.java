@@ -9,7 +9,7 @@ public interface VisibilityEnhancerConfig extends Config
 	// --- OPACITY SECTION ---
 	@ConfigSection(
 			name = "Opacity & Range",
-			description = "Control how transparent players and projectiles appear.",
+			description = "Control how transparent players, NPCs, and projectiles appear.",
 			position = 1,
 			closedByDefault = true
 	)
@@ -37,11 +37,49 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default int playerOpacity() { return 0; }
 
+	@Range(min = 0, max = 100)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+			keyName = "npcOpacity",
+			name = "NPC Opacity",
+			position = 6,
+			section = opacitySection,
+			description = "Opacity of selected NPCs. 100% keeps their normal appearance."
+	)
+	default int npcOpacity() { return 0; }
+
+	@ConfigItem(
+			keyName = "includeAttackableNpcs",
+			name = "Include Attackable NPCs",
+			position = 7,
+			section = opacitySection,
+			description = "Also apply NPC opacity and highlights to NPCs with an available Attack option."
+	)
+	default boolean includeAttackableNpcs() { return false; }
+
+	@ConfigItem(
+			keyName = "includeAllNpcs",
+			name = "Include All NPCs",
+			position = 8,
+			section = opacitySection,
+			description = "Apply NPC opacity and highlights to all NPCs, including non-attackable ones."
+	)
+	default boolean includeAllNpcs() { return false; }
+
+	@ConfigItem(
+			keyName = "npcOpacityInclusions",
+			name = "NPC Inclusions",
+			position = 9,
+			section = opacitySection,
+			description = "NPC names to apply opacity and highlights to. Separate full names with commas or new lines; capitalisation does not matter."
+	)
+	default String npcOpacityInclusions() { return "Sotetseg,"; }
+
 	@Range(min = 1, max = 50)
 	@ConfigItem(
 			keyName = "proximityRange",
 			name = "Others Distance",
-			position = 4,
+			position = 3,
 			section = opacitySection,
 			description = "Radius (in tiles) around you where other players will be affected"
 	)
@@ -52,7 +90,7 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigItem(
 			keyName = "maxAffectedPlayers",
 			name = "Other Player Limit",
-			position = 5,
+			position = 4,
 			section = opacitySection,
 			description = "The maximum number of players to apply effects to"
 	)
@@ -61,7 +99,7 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigItem(
 			keyName = "ignoreFriends",
 			name = "Ignore Friends",
-			position = 6,
+			position = 5,
 			section = opacitySection,
 			description = "Prevents friends from being affected/transparent"
 	)
@@ -360,7 +398,7 @@ public interface VisibilityEnhancerConfig extends Config
 			name = "Hide Stacked Highlights",
 			position = 1,
 			section = outlineSection,
-			description = "Only shows one highlight per tile if players are standing on each other"
+			description = "Suppresses duplicate highlights for stacked players or stacked NPCs, separately for each group"
 	)
 	default boolean hideStackedOutlines() { return true; }
 
@@ -403,9 +441,28 @@ public interface VisibilityEnhancerConfig extends Config
 	default Color othersOutlineColor() { return new Color(255, 255, 255, 15); }
 
 	@ConfigItem(
+			keyName = "highlightNpcs",
+			name = "Highlight NPCs",
+			position = 6,
+			section = outlineSection,
+			description = "Highlight NPCs selected by NPC Inclusions, Include Attackable NPCs, or Include All NPCs. Skips active colour overrides. Independent of the NPC Opacity percentage."
+	)
+	default HighlightStyle highlightNpcs() { return HighlightStyle.OUTLINE; }
+
+	@Alpha
+	@ConfigItem(
+			keyName = "npcOutlineColor",
+			name = "NPC Color",
+			position = 7,
+			section = outlineSection,
+			description = "The colour and opacity of NPC highlights"
+	)
+	default Color npcOutlineColor() { return new Color(255, 255, 255, 10); }
+
+	@ConfigItem(
 			keyName = "highlightThralls",
 			name = "Highlight Thralls",
-			position = 6,
+			position = 8,
 			section = outlineSection,
 			description = "Choose how to highlight Arceeus thralls"
 	)
@@ -415,7 +472,7 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigItem(
 			keyName = "thrallsOutlineColor",
 			name = "Thralls Color",
-			position = 7,
+			position = 9,
 			section = outlineSection,
 			description = "The color of thrall highlights"
 	)

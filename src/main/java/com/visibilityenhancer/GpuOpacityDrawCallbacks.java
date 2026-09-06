@@ -10,7 +10,7 @@ import net.runelite.api.Scene;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.plugins.gpu.GpuPlugin;
 
-/** Keeps the supported renderer in charge, substituting only its player-model input. */
+/** Keeps the supported renderer in charge, substituting only selected actor-model inputs. */
 final class GpuOpacityDrawCallbacks implements DrawCallbacks
 {
    // HD is an optional Plugin Hub plugin with its own class loader. Do not link against it.
@@ -55,7 +55,7 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
    public void drawTemp(Projection projection, Scene scene, GameObject object, Model model,
                         int orientation, int x, int y, int z)
    {
-      // Players arrive on the client thread. GPU uploads synchronously; HD ZoneRenderer
+      // Players and NPCs arrive on the client thread. GPU uploads synchronously; HD ZoneRenderer
       // copies model arrays before returning when it queues asynchronous uploads.
       // Worker-thread scenery callbacks are delegated without interception.
       Model prepared = object == null ? model : prepareModel.apply(object.getRenderable(), model);

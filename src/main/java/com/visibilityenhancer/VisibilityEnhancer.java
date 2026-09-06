@@ -26,6 +26,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.HotkeyListener;
+import net.runelite.client.util.Text;
 import net.runelite.client.events.PluginChanged;
 import net.runelite.client.plugins.PluginManager;
 
@@ -101,6 +102,9 @@ public class VisibilityEnhancer extends Plugin
    private final Map<Player, Set<byte[]>> playerTrackedTransparencies = new WeakHashMap<>();
 
    private final Map<Player, GpuOpacityModel> gpuPlayerModels = new IdentityHashMap<>();
+   private final Map<NPC, GpuOpacityModel> gpuNpcModels = new IdentityHashMap<>();
+   private String cachedNpcOpacityInclusions;
+   private final Set<String> includedNpcNames = new HashSet<>();
    private GpuOpacityDrawCallbacks gpuDrawCallbacks;
    private volatile boolean gpuOpacityEnabled;
 
@@ -312,6 +316,14 @@ public class VisibilityEnhancer extends Plugin
            15703,
            15706,
            15709
+   );
+
+   // Boss hazards represented by NPCs, not projectiles. Never fade their models,
+   // even with Include All NPCs; native transparency and highlights are preserved.
+   private static final Set<Integer> OPACITY_PROTECTED_NPC_IDS = ImmutableSet.of(
+           NpcID.CRYSTAL_HUNLLEF_CRYSTALS, // Regular Gauntlet tornado
+           NpcID.CRYSTAL_HUNLLEF_CRYSTALS_HM, // Corrupted Gauntlet tornado
+           NpcID.CRYSTAL_HUNLLEF_CRYSTALS_ECHO_CRYSTALS // Echo Hunllef tornado
    );
 
    // Whitelist for critical SpotAnims/Graphics (the visual effects themselves)
@@ -789,6 +801,23 @@ public class VisibilityEnhancer extends Plugin
       culledPlayers.remove(p);
       lastCombatCycleMap.remove(p);
       combatTimerMap.remove(p);
+   }
+
+   @Subscribe
+   public void onNpcDespawned(NpcDespawned event)
+   {
+      gpuNpcModels.remove(event.getNpc());
+   }
+
+   @Subscribe
+   public void onGameStateChanged(GameStateChanged event)
+   {
+      if (event.getGameState() != GameState.LOGGED_IN)
+      {
+         // Renderer callbacks must keep their identity through loading, but these
+         // per-NPC views need not retain actors from a previous scene/world.
+         gpuNpcModels.clear();
+      }
    }
 
    @Subscribe
@@ -1844,6 +1873,7 @@ public class VisibilityEnhancer extends Plugin
       // Never replace an unrelated renderer or another plugin's callback wrapper.
       gpuDrawCallbacks = null;
       gpuPlayerModels.clear();
+      gpuNpcModels.clear();
       if (!GpuOpacityDrawCallbacks.supports(current))
       {
          return;
@@ -1862,9 +1892,9 @@ public class VisibilityEnhancer extends Plugin
          restoreOpacity(player);
       }
 
-      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuPlayerModel);
+      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuModel);
       client.setDrawCallbacks(gpuDrawCallbacks);
-      log.debug("Render-time player opacity enabled for {}", current.getClass().getName());
+      log.debug("Render-time player/NPC opacity enabled for {}", current.getClass().getName());
    }
 
    private boolean detachGpuDrawCallbacks()
@@ -1879,6 +1909,7 @@ public class VisibilityEnhancer extends Plugin
       }
       gpuDrawCallbacks = null;
       gpuPlayerModels.clear();
+      gpuNpcModels.clear();
       return true;
    }
 
@@ -1895,6 +1926,138 @@ public class VisibilityEnhancer extends Plugin
       }
       clearAllGhosting();
       return true;
+   }
+
+   private Model prepareGpuModel(Renderable renderable, Model model)
+   {
+      if (renderable instanceof NPC)
+      {
+         return prepareGpuNpcModel((NPC) renderable, model);
+      }
+      return prepareGpuPlayerModel(renderable, model);
+   }
+
+   private boolean isNpcOpacityIncluded(NPC npc)
+   {
+      String inclusions = config.npcOpacityInclusions();
+      if (!Objects.equals(inclusions, cachedNpcOpacityInclusions))
+      {
+         cachedNpcOpacityInclusions = inclusions;
+         includedNpcNames.clear();
+         if (inclusions != null)
+         {
+            for (String entry : inclusions.split("[,\\r\\n]+"))
+            {
+               String name = Text.removeTags(entry).trim().toLowerCase(Locale.ROOT);
+               if (!name.isEmpty())
+               {
+                  includedNpcNames.add(name);
+               }
+            }
+         }
+      }
+
+      if (includedNpcNames.isEmpty())
+      {
+         return false;
+      }
+      // Read the current name on each draw so transformations do not retain an
+      // inclusion decision from an earlier form of the NPC.
+      String name = npc.getName();
+      return name != null && includedNpcNames.contains(Text.removeTags(name).trim().toLowerCase(Locale.ROOT));
+   }
+
+   boolean isNpcSelected(NPC npc)
+   {
+      if (npc == null)
+      {
+         return false;
+      }
+      // Selection is additive: explicit names work independently of both
+      // category checkboxes, including an NPC's temporarily non-attackable forms.
+      if (config.includeAllNpcs() || isNpcOpacityIncluded(npc))
+      {
+         return true;
+      }
+      if (!config.includeAttackableNpcs())
+      {
+         return false;
+      }
+
+      // Use the current form, not combat level or a cached base composition.
+      NPCComposition composition = npc.getTransformedComposition();
+      if (composition == null || !composition.isInteractible())
+      {
+         return false;
+      }
+      String[] actions = composition.getActions();
+      if (actions != null)
+      {
+         for (String action : actions)
+         {
+            if (action != null && "Attack".equalsIgnoreCase(Text.removeTags(action).trim()))
+            {
+               return true;
+            }
+         }
+      }
+      return false;
+   }
+
+   boolean shouldHighlightNpc(NPC npc)
+   {
+      if (!isActive() || peekHeld || !isNpcSelected(npc) || !shouldDraw(npc, false))
+      {
+         return false;
+      }
+      Model model = npc.getModel();
+      return model != null && model.getOverrideAmount() == 0;
+   }
+
+   private boolean isOpacityProtectedNpc(NPC npc)
+   {
+      if (OPACITY_PROTECTED_NPC_IDS.contains(npc.getId()))
+      {
+         return true;
+      }
+      NPCComposition composition = npc.getTransformedComposition();
+      return composition != null && OPACITY_PROTECTED_NPC_IDS.contains(composition.getId());
+   }
+
+   private Model prepareGpuNpcModel(NPC npc, Model model)
+   {
+      if (!isGpuPlayerOpacityActive() || !isActive() || model == null)
+      {
+         return model;
+      }
+
+      // NPC colour mechanics are protected immediately. Do not reuse the player
+      // animation exemptions/timers or the player-only HD cape-hiding fallback.
+      if (model.getOverrideAmount() != 0 || !isNpcSelected(npc))
+      {
+         gpuNpcModels.remove(npc);
+         return model;
+      }
+
+      // Keep hazardous NPC attacks at their native opacity. This is separate
+      // from selection so their configured highlights still work normally.
+      if (isOpacityProtectedNpc(npc))
+      {
+         gpuNpcModels.remove(npc);
+         return model;
+      }
+
+      int opacity = Math.max(1, Math.min(100, config.npcOpacity()));
+      if (opacity >= 100)
+      {
+         gpuNpcModels.remove(npc);
+         return model;
+      }
+
+      // Keep Attack and other interactions at 0%; NPCs do not inherit player
+      // combat culling, room floors, distance fading, or the affected-player limit.
+      return gpuNpcModels.computeIfAbsent(npc, n -> new GpuOpacityModel())
+              .update(model, clampAlpha(opacity));
    }
 
    private Model prepareGpuPlayerModel(Renderable renderable, Model model)
@@ -2119,6 +2282,7 @@ public class VisibilityEnhancer extends Plugin
       originalTransparencies.clear();
       playerTrackedTransparencies.clear();
       gpuPlayerModels.clear();
+      gpuNpcModels.clear();
       immunePlayers.clear();
       supportedPlayers.clear();
 

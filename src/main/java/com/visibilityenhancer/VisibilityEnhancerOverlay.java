@@ -52,6 +52,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private final SpriteManager spriteManager;
 
 	private final Set<WorldPoint> renderedTiles = new HashSet<>();
+	private final Set<WorldPoint> renderedNpcTiles = new HashSet<>();
 	private final List<Player> sortedGhosts = new ArrayList<>(32);
 
 	private static final int MESSAGE_DISPLAY_DURATION_MS = 4000;
@@ -97,7 +98,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private final Map<Player, SpamTracker> spamTrackerMap = new WeakHashMap<>();
 
 	@Inject
-	private VisibilityEnhancerOverlay(
+	VisibilityEnhancerOverlay(
 			Client client,
 			VisibilityEnhancer plugin,
 			VisibilityEnhancerConfig config,
@@ -249,6 +250,8 @@ public class VisibilityEnhancerOverlay extends Overlay
 			}
 		}
 
+		renderNpcHighlights(graphics);
+
 		// Stack warnings should render independently of highlightOthers
 		renderStackWarnings(graphics);
 
@@ -326,6 +329,47 @@ public class VisibilityEnhancerOverlay extends Overlay
 		return null;
 	}
 
+	private void renderNpcHighlights(Graphics2D graphics)
+	{
+		HighlightStyle style = config.highlightNpcs();
+		if (style == HighlightStyle.NONE || plugin.isPeekHeld())
+		{
+			return;
+		}
+
+		renderedNpcTiles.clear();
+		boolean hideStacked = config.hideStackedOutlines();
+		Color color = config.npcOutlineColor();
+		for (NPC npc : client.getNpcs())
+		{
+			if (!plugin.shouldHighlightNpc(npc))
+			{
+				continue;
+			}
+			// Keep the separately configured thrall style, without drawing it twice
+			// when Include All NPCs also selects that thrall.
+			if (VisibilityEnhancer.THRALL_IDS.contains(npc.getId())
+					&& config.highlightThralls() != HighlightStyle.NONE)
+			{
+				continue;
+			}
+			WorldPoint point = npc.getWorldLocation();
+			if (hideStacked && point != null && !renderedNpcTiles.add(point))
+			{
+				continue;
+			}
+			if (style == HighlightStyle.TILE || style == HighlightStyle.TRUE_TILE
+					|| style == HighlightStyle.BOTH || style == HighlightStyle.BOTH_TRUE)
+			{
+				renderFloorTile(graphics, npc, color, style);
+			}
+			if (style == HighlightStyle.OUTLINE || style == HighlightStyle.BOTH || style == HighlightStyle.BOTH_TRUE)
+			{
+				renderOutlineLayers(npc, color);
+			}
+		}
+	}
+
 	private void renderOutlineLayers(Player player, Color color)
 	{
 		if (config.enableGlow())
@@ -338,7 +382,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 	}
 
-	private void renderOutlineLayers(NPC npc, Color color)
+	void renderOutlineLayers(NPC npc, Color color)
 	{
 		if (config.enableGlow())
 		{
@@ -350,7 +394,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 	}
 
-	private void renderFloorTile(Graphics2D graphics, Actor actor, Color color, HighlightStyle style)
+	void renderFloorTile(Graphics2D graphics, Actor actor, Color color, HighlightStyle style)
 	{
 		LocalPoint lp = actor.getLocalLocation();
 
