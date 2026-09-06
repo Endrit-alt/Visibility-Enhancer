@@ -159,7 +159,7 @@ public interface VisibilityEnhancerConfig extends Config
 			name = "Clear Ground Self",
 			position = 1,
 			section = extrasSection,
-			description = "Hides your Cape, Shield, Legs, and Boots to see ground markers better. Does not support opacity."
+			description = "Hides your Cape, Shield, Legs, and Boots to see ground markers better. The remaining body uses My Opacity."
 	)
 	default boolean selfClearGround() { return false; }
 
@@ -168,7 +168,7 @@ public interface VisibilityEnhancerConfig extends Config
 			name = "Clear Ground Others",
 			position = 2,
 			section = extrasSection,
-			description = "Hides Cape, Shield, Legs, and Boots on nearby affected players. Does not support opacity."
+			description = "Hides Cape, Shield, Legs, and Boots on nearby affected players. The remaining body uses Others Opacity, including distance fading."
 	)
 	default boolean othersClearGround() { return false; }
 

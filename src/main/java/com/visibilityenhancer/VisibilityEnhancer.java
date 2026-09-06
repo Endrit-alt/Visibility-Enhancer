@@ -8,12 +8,14 @@ import java.util.*;
 import javax.inject.Inject;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.*;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.api.kit.KitType;
+import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.callback.Hooks;
 import net.runelite.client.config.ConfigManager;
@@ -27,6 +29,7 @@ import net.runelite.client.util.HotkeyListener;
 import net.runelite.client.events.PluginChanged;
 import net.runelite.client.plugins.PluginManager;
 
+@Slf4j
 @PluginDescriptor(
         name = "Visibility",
         description = "Teammate opacity, ground-view filters, and outlines for raids and other PvM content.",
@@ -96,6 +99,10 @@ public class VisibilityEnhancer extends Plugin
    private final Map<byte[], byte[]> originalTransparencies = new WeakHashMap<>();
 
    private final Map<Player, Set<byte[]>> playerTrackedTransparencies = new WeakHashMap<>();
+
+   private final Map<Player, GpuOpacityModel> gpuPlayerModels = new IdentityHashMap<>();
+   private GpuOpacityDrawCallbacks gpuDrawCallbacks;
+   private volatile boolean gpuOpacityEnabled;
 
    private final Set<Player> immunePlayers = new HashSet<>();
    private final Set<Player> supportedPlayers = new HashSet<>();
@@ -343,6 +350,9 @@ public class VisibilityEnhancer extends Plugin
       wasActive = false;
       currentRegionId = -1;
 
+      gpuOpacityEnabled = true;
+      clientThread.invokeLater(this::syncGpuDrawCallbacks);
+
       isProjectileOverrideActive = false;
       if (pluginManager != null)
       {
@@ -361,12 +371,16 @@ public class VisibilityEnhancer extends Plugin
    @Override
    protected void shutDown()
    {
+      gpuOpacityEnabled = false;
       overlayManager.remove(overlay);
       hooks.unregisterRenderableDrawListener(drawListener);
       keyManager.unregisterKeyListener(hotkeyListener);
       keyManager.unregisterKeyListener(peekListener);
 
-      clientThread.invokeLater(this::clearAllGhosting);
+      clientThread.invokeLater(() ->
+      {
+         return finishRendererShutdown();
+      });
 
       cachedLocalPlayer = null;
       wasActive = false;
@@ -767,6 +781,7 @@ public class VisibilityEnhancer extends Plugin
       overrideForcedPlayers.remove(p);
       immunePlayers.remove(p);
       supportedPlayers.remove(p);
+      gpuPlayerModels.remove(p);
 
       lastCriticalGraphicCycleMap.remove(p);
       criticalGraphicPlayers.remove(p);
@@ -990,6 +1005,8 @@ public class VisibilityEnhancer extends Plugin
 
       updatePlayersInRange();
 
+      gpuPlayerModels.keySet().removeIf(p -> p != local && !currentInRange.contains(p));
+
       boolean hideOthersClothes = config.othersClearGround();
 
       for (Player p : currentInRange)
@@ -1012,6 +1029,8 @@ public class VisibilityEnhancer extends Plugin
    @Subscribe
    public void onBeforeRender(BeforeRender event)
    {
+      syncGpuDrawCallbacks();
+
       if (!isActive())
       {
          return;
@@ -1344,6 +1363,12 @@ public class VisibilityEnhancer extends Plugin
 
    private int getEffectiveOpacity(Player player)
    {
+      Model model = player == null || client.getLocalPlayer() == null || peekHeld ? null : player.getModel();
+      return getEffectiveOpacity(player, model);
+   }
+
+   private int getEffectiveOpacity(Player player, Model model)
+   {
       Player local = client.getLocalPlayer();
       if (player == null || local == null)
       {
@@ -1354,22 +1379,21 @@ public class VisibilityEnhancer extends Plugin
       {
          if (player == local)
          {
-            return config.selfClearGround() ? 100 : config.selfOpacity();
+            return config.selfOpacity();
          }
 
          return 0;
       }
 
       // Boss overrides take precedence over normal opacity and the 1% floors.
-      if (shouldForceOpaqueForOverride(player, player.getModel()))
+      if (shouldForceOpaqueForOverride(player, model))
       {
          return 100;
       }
 
       boolean isLocal = (player == local);
-      int baseOpacity = isLocal ?
-              (config.selfClearGround() ? 100 : config.selfOpacity()) :
-              (config.othersClearGround() ? 100 : config.playerOpacity());
+      // Clear Ground filters equipment separately; it no longer disables body opacity.
+      int baseOpacity = isLocal ? config.selfOpacity() : config.playerOpacity();
 
       int calculatedOpacity = baseOpacity;
 
@@ -1642,8 +1666,15 @@ public class VisibilityEnhancer extends Plugin
       if (opacity >= 100 || criticalGraphicPlayers.contains(player)
               || (opacity == 1 && MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId)))
       {
-         // Preserve mechanic visibility and Follow in exception rooms. The ordinary
-         // out-of-combat 1% floor must not bypass hiding an unsupported model.
+         // Preserve mechanic visibility and Follow in exception rooms.
+         fallbackHiddenPlayers.remove(player);
+         return false;
+      }
+
+      // The renderer wrapper supplies alpha even for models the legacy path cannot fade.
+      // Zero-opacity combat culling remains separate from this unsupported-model fallback.
+      if (isGpuPlayerOpacityActive())
+      {
          fallbackHiddenPlayers.remove(player);
          return false;
       }
@@ -1783,6 +1814,118 @@ public class VisibilityEnhancer extends Plugin
       originalEquipmentMap.remove(player);
    }
 
+   private boolean isGpuPlayerOpacityActive()
+   {
+      return gpuOpacityEnabled && gpuDrawCallbacks != null && client.getDrawCallbacks() == gpuDrawCallbacks;
+   }
+
+   private boolean canChangeRendererCallbacks()
+   {
+      // Map loaders snapshot the callback identity. Replacing it before swapScene
+      // causes the client to skip that swap, leaving HD with pending zone data.
+      GameState state = client.getGameState();
+      return state == GameState.LOGGED_IN || state == GameState.LOGIN_SCREEN
+              || state == GameState.LOGIN_SCREEN_AUTHENTICATOR;
+   }
+
+   private void syncGpuDrawCallbacks()
+   {
+      if (!gpuOpacityEnabled)
+      {
+         return;
+      }
+
+      DrawCallbacks current = client.getDrawCallbacks();
+      if (gpuDrawCallbacks != null && current == gpuDrawCallbacks)
+      {
+         return;
+      }
+
+      // Never replace an unrelated renderer or another plugin's callback wrapper.
+      gpuDrawCallbacks = null;
+      gpuPlayerModels.clear();
+      if (!GpuOpacityDrawCallbacks.supports(current))
+      {
+         return;
+      }
+
+      // BeforeRender retries once the initial scene has finished loading. Keep an
+      // existing wrapper installed across later loads (the identity check above).
+      if (!canChangeRendererCallbacks())
+      {
+         return;
+      }
+
+      // Undo any legacy player alpha writes before switching to renderer-only views.
+      for (Player player : new ArrayList<>(playerTrackedTransparencies.keySet()))
+      {
+         restoreOpacity(player);
+      }
+
+      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuPlayerModel);
+      client.setDrawCallbacks(gpuDrawCallbacks);
+      log.debug("Render-time player opacity enabled for {}", current.getClass().getName());
+   }
+
+   private boolean detachGpuDrawCallbacks()
+   {
+      if (gpuDrawCallbacks != null && client.getDrawCallbacks() == gpuDrawCallbacks)
+      {
+         if (!canChangeRendererCallbacks())
+         {
+            return false;
+         }
+         client.setDrawCallbacks(gpuDrawCallbacks.getDelegate());
+      }
+      gpuDrawCallbacks = null;
+      gpuPlayerModels.clear();
+      return true;
+   }
+
+   private boolean finishRendererShutdown()
+   {
+      // A quick re-enable must cancel an older deferred shutdown.
+      if (gpuOpacityEnabled)
+      {
+         return true;
+      }
+      if (!detachGpuDrawCallbacks())
+      {
+         return false;
+      }
+      clearAllGhosting();
+      return true;
+   }
+
+   private Model prepareGpuPlayerModel(Renderable renderable, Model model)
+   {
+      if (!isGpuPlayerOpacityActive() || !isActive() || !(renderable instanceof Player) || model == null)
+      {
+         return model;
+      }
+
+      Player player = (Player) renderable;
+      if (player != client.getLocalPlayer() && !currentInRange.contains(player))
+      {
+         return model;
+      }
+
+      // Use the exact model the renderer is about to upload. Calling player.getModel()
+      // here could rebuild a shared animation model and overwrite this one.
+      int opacity = getEffectiveOpacity(player, model);
+      if (opacity >= 100)
+      {
+         return model;
+      }
+      if (opacity == 0)
+      {
+         return null;
+      }
+
+      return gpuPlayerModels.computeIfAbsent(player, p -> new GpuOpacityModel())
+              .update(model, clampAlpha(opacity), gpuDrawCallbacks.isHdZoneRenderer());
+   }
+
    private void applyModelAlpha(Model m, int alpha)
    {
       applyModelAlpha(null, m, alpha);
@@ -1790,6 +1933,11 @@ public class VisibilityEnhancer extends Plugin
 
    private void applyModelAlpha(Player p, Model m, int alpha)
    {
+      if (p != null && isGpuPlayerOpacityActive())
+      {
+         return;
+      }
+
       byte[] trans = m.getFaceTransparencies();
       if (trans == null || trans.length == 0)
       {
@@ -1885,6 +2033,11 @@ public class VisibilityEnhancer extends Plugin
 
    private void restoreOpacity(Player p)
    {
+      if (isGpuPlayerOpacityActive())
+      {
+         return;
+      }
+
       Model model = p.getModel();
       if (model != null)
       {
@@ -1965,6 +2118,7 @@ public class VisibilityEnhancer extends Plugin
 
       originalTransparencies.clear();
       playerTrackedTransparencies.clear();
+      gpuPlayerModels.clear();
       immunePlayers.clear();
       supportedPlayers.clear();
 
