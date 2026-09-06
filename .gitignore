@@ -1,5 +1,6 @@
 .gradle
 build
+/docs/render-time-opacity.md
 .idea/
 .project
 .settings/
