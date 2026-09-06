@@ -46,7 +46,7 @@ public interface VisibilityEnhancerConfig extends Config
 			section = opacitySection,
 			description = "Opacity of selected NPCs. 100% keeps their normal appearance."
 	)
-	default int npcOpacity() { return 0; }
+	default int npcOpacity() { return 10; }
 
 	@ConfigItem(
 			keyName = "includeAttackableNpcs",
