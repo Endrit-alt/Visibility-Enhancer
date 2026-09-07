@@ -22,6 +22,7 @@ import net.runelite.client.callback.RenderCallbackManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.ProfileChanged;
 import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -43,6 +44,7 @@ public class VisibilityEnhancer extends Plugin
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
    private static final int CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES = 120;
    private static final int COX_MAX_AFFECTED_PLAYERS = 16;
+   private static final String NPC_OPACITY_20_MIGRATION_KEY = "npcOpacity20Migrated";
 
    private final Map<Player, Integer> lastCombatCycleMap = new HashMap<>();
    private static final int COMBAT_TIMEOUT_CYCLES = 300; // 10 game ticks of "memory"
@@ -229,14 +231,6 @@ public class VisibilityEnhancer extends Plugin
             13106 // Zalcano
    );
 
-   // Keep other players faintly rendered in rooms where their Follow option is mechanically useful.
-   // This only supplies a 1% minimum for an otherwise 0% result; forced model overrides remain authoritative.
-   private static final Set<Integer> MINIMUM_OTHER_PLAYER_OPACITY_REGIONS = ImmutableSet.of(
-           12611, // ToB Verzik
-           15186  // ToA Path of Apmeken (Monkey Puzzle)
-   );
-
-
    private static final Set<Integer> EXEMPT_ANIMATIONS = ImmutableSet.<Integer>builder()
            .add(1378, 7642, 7643, 7514, 1062, 1203, 7644, 7640, 7638, 10172, 5062, 9168, 8104)
            .add(714, 4069, 1500, 7040, 9131, 9286, 3945, 836, 2881, 4423) // Teleport animations
@@ -356,6 +350,7 @@ public class VisibilityEnhancer extends Plugin
    @Override
    protected void startUp()
    {
+      migrateNpcOpacityDefault();
       overlayManager.add(overlay);
       hooks.registerRenderableDrawListener(drawListener);
       keyManager.registerKeyListener(hotkeyListener);
@@ -382,6 +377,34 @@ public class VisibilityEnhancer extends Plugin
             }
          }
       }
+   }
+
+   private void migrateNpcOpacityDefault()
+   {
+      // Keep the value and completion marker on the same active config profile.
+      synchronized (configManager)
+      {
+         if ("true".equals(configManager.getConfiguration("visibilityenhancer", NPC_OPACITY_20_MIGRATION_KEY)))
+         {
+            return;
+         }
+
+         Integer opacity = configManager.getConfiguration("visibilityenhancer", "npcOpacity", Integer.class);
+         if (Integer.valueOf(10).equals(opacity))
+         {
+            configManager.setConfiguration("visibilityenhancer", "npcOpacity", 20);
+         }
+
+         // Unannotated internal key: resetting visible settings must not rerun the migration.
+         // Mark every profile, including new ones, so later choices of 10% are respected.
+         configManager.setConfiguration("visibilityenhancer", NPC_OPACITY_20_MIGRATION_KEY, true);
+      }
+   }
+
+   @Subscribe
+   public void onProfileChanged(ProfileChanged event)
+   {
+      migrateNpcOpacityDefault();
    }
 
    @Override
@@ -650,7 +673,7 @@ public class VisibilityEnhancer extends Plugin
          // --- 4. Distance Math & 0% Cull Check ---
          int opacity = getEffectiveOpacity(p);
 
-         if (opacity == 0 && !exemptPlayers.contains(p))
+         if (!isGpuPlayerOpacityActive() && opacity == 0 && !exemptPlayers.contains(p))
          {
             culledPlayers.add(p);
          }
@@ -1239,8 +1262,9 @@ public class VisibilityEnhancer extends Plugin
             return false;
          }
 
-         // --- Fast O(1) Absolute Culling Check ---
-         if (!drawingUI && culledPlayers.contains(player))
+         // Only legacy renderers remove zero-opacity players from the scene.
+         // Ignore stale culls after the wrapper takes ownership so clickboxes survive.
+         if (!drawingUI && !isGpuPlayerOpacityActive() && culledPlayers.contains(player))
          {
             return false;
          }
@@ -1466,9 +1490,11 @@ public class VisibilityEnhancer extends Plugin
 
    private boolean shouldKeepVisibleAtZeroOpacity(Player player)
    {
+      // Critical attached graphics still need the model drawn. Interaction floors
+      // are unnecessary when the wrapper can skip rendering without removing the actor.
       return criticalGraphicPlayers.contains(player)
-              || (player != client.getLocalPlayer()
-              && (MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId) || !isInCombat(player)));
+              || (!isGpuPlayerOpacityActive() && player != client.getLocalPlayer()
+              && !isInCombat(player));
    }
 
    private void forceOpacityUpdate()
@@ -1695,19 +1721,18 @@ public class VisibilityEnhancer extends Plugin
          return false;
       }
 
-      int opacity = getEffectiveOpacity(player);
-      if (opacity >= 100 || criticalGraphicPlayers.contains(player)
-              || (opacity == 1 && MINIMUM_OTHER_PLAYER_OPACITY_REGIONS.contains(currentRegionId)))
+      // The wrapper can fade unsupported models and hide 0% models at draw time
+      // without removing their clickboxes. Never use scene-level fallback on this path.
+      if (isGpuPlayerOpacityActive())
       {
-         // Preserve mechanic visibility and Follow in exception rooms.
          fallbackHiddenPlayers.remove(player);
          return false;
       }
 
-      // The renderer wrapper supplies alpha even for models the legacy path cannot fade.
-      // Zero-opacity combat culling remains separate from this unsupported-model fallback.
-      if (isGpuPlayerOpacityActive())
+      int opacity = getEffectiveOpacity(player);
+      if (opacity >= 100 || criticalGraphicPlayers.contains(player))
       {
+         // Preserve mechanic visibility on legacy renderers.
          fallbackHiddenPlayers.remove(player);
          return false;
       }
@@ -2063,7 +2088,7 @@ public class VisibilityEnhancer extends Plugin
       }
 
       // Keep Attack and other interactions at 0%; NPCs do not inherit player
-      // combat culling, room floors, distance fading, or the affected-player limit.
+      // combat culling, distance fading, or the affected-player limit.
       return gpuNpcModels.computeIfAbsent(npc, n -> new GpuOpacityModel())
               .update(model, clampAlpha(opacity));
    }
@@ -2090,6 +2115,8 @@ public class VisibilityEnhancer extends Plugin
       }
       if (opacity == 0)
       {
+         // Skip only the renderer upload/draw, after scene insertion and picking.
+         // The player's clickbox and right-click actions remain available.
          return null;
       }
 
