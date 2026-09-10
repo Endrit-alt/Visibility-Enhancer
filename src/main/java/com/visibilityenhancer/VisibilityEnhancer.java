@@ -80,6 +80,9 @@ public class VisibilityEnhancer extends Plugin
    private VisibilityEnhancerOverheadOverlay overheadOverlay;
 
    @Inject
+   private VisibilityEnhancerOutlineOverlay outlineOverlay;
+
+   @Inject
    private Hooks hooks;
 
    @Inject
@@ -356,6 +359,7 @@ public class VisibilityEnhancer extends Plugin
       migrateNpcOpacityDefault();
       overlayManager.add(overlay);
       overlayManager.add(overheadOverlay);
+      overlayManager.add(outlineOverlay);
       hooks.registerRenderableDrawListener(drawListener);
       keyManager.registerKeyListener(hotkeyListener);
       keyManager.registerKeyListener(peekListener);
@@ -417,6 +421,7 @@ public class VisibilityEnhancer extends Plugin
       gpuOpacityEnabled = false;
       overlayManager.remove(overlay);
       overlayManager.remove(overheadOverlay);
+      overlayManager.remove(outlineOverlay);
       hooks.unregisterRenderableDrawListener(drawListener);
       keyManager.unregisterKeyListener(hotkeyListener);
       keyManager.unregisterKeyListener(peekListener);
@@ -1090,6 +1095,8 @@ public class VisibilityEnhancer extends Plugin
    @Subscribe
    public void onBeforeRender(BeforeRender event)
    {
+      // Discard a previous frame's queue even if its late overlay pass was skipped.
+      if (overlay != null) overlay.clearPendingOutlines();
       syncGpuDrawCallbacks();
 
       if (gpuDrawCallbacks != null)
@@ -1968,6 +1975,7 @@ public class VisibilityEnhancer extends Plugin
       {
          return true;
       }
+      if (overlay != null) overlay.clearPendingOutlines();
       if (!detachGpuDrawCallbacks())
       {
          return false;

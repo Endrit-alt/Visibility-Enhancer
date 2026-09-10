@@ -57,6 +57,9 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private final Set<StackedHighlightTracker.TileKey> renderedTiles = new HashSet<>();
 	private final Set<StackedHighlightTracker.TileKey> renderedNpcTiles = new HashSet<>();
 	private final List<Player> sortedGhosts = new ArrayList<>(32);
+	// Retain list capacity, not models or per-outline image buffers. Selection runs once.
+	private final List<Actor> pendingOutlineActors = new ArrayList<>(32);
+	private final List<Color> pendingOutlineColors = new ArrayList<>(32);
 	private final List<Player> sortedChatPlayers = new ArrayList<>(32);
 	private final OverheadTextLayout overheadTextLayout = new OverheadTextLayout();
 
@@ -124,6 +127,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		clearPendingOutlines();
 		if (!plugin.isActive())
 		{
 			return null;
@@ -157,7 +161,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 							|| thrallStyle == HighlightStyle.BOTH
 							|| thrallStyle == HighlightStyle.BOTH_TRUE)
 					{
-						renderOutlineLayers(npc, thrallsColor);
+						queueOutline(npc, thrallsColor);
 					}
 				}
 			}
@@ -183,7 +187,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 						|| selfStyle == HighlightStyle.BOTH
 						|| selfStyle == HighlightStyle.BOTH_TRUE)
 				{
-					renderOutlineLayers(local, config.selfOutlineColor());
+					queueOutline(local, config.selfOutlineColor());
 				}
 			}
 		}
@@ -258,7 +262,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 						|| othersStyle == HighlightStyle.BOTH
 						|| othersStyle == HighlightStyle.BOTH_TRUE)
 				{
-					renderOutlineLayers(player, othersColor);
+					queueOutline(player, othersColor);
 				}
 			}
 		}
@@ -401,8 +405,49 @@ public class VisibilityEnhancerOverlay extends Overlay
 			}
 			if (style == HighlightStyle.OUTLINE || style == HighlightStyle.BOTH || style == HighlightStyle.BOTH_TRUE)
 			{
-				renderOutlineLayers(npc, color);
+				queueOutline(npc, color);
 			}
+		}
+	}
+
+	private void queueOutline(Actor actor, Color color)
+	{
+		if (!config.enableGlow() && !config.enableOutline()) return;
+		pendingOutlineActors.add(actor);
+		pendingOutlineColors.add(color);
+	}
+
+	void clearPendingOutlines()
+	{
+		pendingOutlineActors.clear();
+		pendingOutlineColors.clear();
+	}
+
+	// Draw once after Tile Layers' scene mask, without masking against nearer actors.
+	Dimension renderOutlines(Graphics2D graphics)
+	{
+		try
+		{
+			if (!plugin.isActive()) return null;
+			for (int i = 0; i < pendingOutlineActors.size(); i++)
+			{
+				Actor actor = pendingOutlineActors.get(i);
+				if (plugin.isPeekHeld() && actor != client.getLocalPlayer()) continue;
+				Color color = pendingOutlineColors.get(i);
+				if (actor instanceof Player)
+				{
+					renderOutlineLayers((Player) actor, color);
+				}
+				else if (actor instanceof NPC)
+				{
+					renderOutlineLayers((NPC) actor, color);
+				}
+			}
+			return null;
+		}
+		finally
+		{
+			clearPendingOutlines();
 		}
 	}
 
