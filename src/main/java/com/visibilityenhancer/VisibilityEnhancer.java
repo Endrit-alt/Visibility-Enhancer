@@ -77,6 +77,9 @@ public class VisibilityEnhancer extends Plugin
    private VisibilityEnhancerOverlay overlay;
 
    @Inject
+   private VisibilityEnhancerOverheadOverlay overheadOverlay;
+
+   @Inject
    private Hooks hooks;
 
    @Inject
@@ -352,6 +355,7 @@ public class VisibilityEnhancer extends Plugin
    {
       migrateNpcOpacityDefault();
       overlayManager.add(overlay);
+      overlayManager.add(overheadOverlay);
       hooks.registerRenderableDrawListener(drawListener);
       keyManager.registerKeyListener(hotkeyListener);
       keyManager.registerKeyListener(peekListener);
@@ -412,6 +416,7 @@ public class VisibilityEnhancer extends Plugin
    {
       gpuOpacityEnabled = false;
       overlayManager.remove(overlay);
+      overlayManager.remove(overheadOverlay);
       hooks.unregisterRenderableDrawListener(drawListener);
       keyManager.unregisterKeyListener(hotkeyListener);
       keyManager.unregisterKeyListener(peekListener);

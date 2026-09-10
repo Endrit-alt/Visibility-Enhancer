@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.HeadIcon;
@@ -43,6 +44,7 @@ import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.Text;
 
+@Singleton
 public class VisibilityEnhancerOverlay extends Overlay
 {
 	private final Client client;
@@ -255,6 +257,20 @@ public class VisibilityEnhancerOverlay extends Overlay
 		// Stack warnings should render independently of highlightOthers
 		renderStackWarnings(graphics);
 
+		return null;
+	}
+
+	// Character UI belongs after scene overlays, alongside the native overheads.
+	// Keep ground highlights in render() so scene-layer effects can still mask them.
+	Dimension renderOverheads(Graphics2D graphics)
+	{
+		if (!plugin.isActive())
+		{
+			return null;
+		}
+
+		Player local = client.getLocalPlayer();
+		WorldPoint localPoint = local != null ? local.getWorldLocation() : null;
 		boolean othersCustomPrayers = config.othersTransparentPrayers() && !plugin.isPeekHeld();
 
 		if (othersCustomPrayers)
