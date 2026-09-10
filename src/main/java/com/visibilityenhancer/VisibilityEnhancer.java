@@ -1092,6 +1092,11 @@ public class VisibilityEnhancer extends Plugin
    {
       syncGpuDrawCallbacks();
 
+      if (gpuDrawCallbacks != null)
+      {
+         gpuDrawCallbacks.beginHighlightFrame(isGpuPlayerOpacityActive() && isActive() && config.hideStackedOutlines());
+      }
+
       if (!isActive())
       {
          return;
@@ -1875,6 +1880,11 @@ public class VisibilityEnhancer extends Plugin
       }
 
       originalEquipmentMap.remove(player);
+   }
+
+   Actor getStackHighlightActor(Actor actor)
+   {
+      return isGpuPlayerOpacityActive() ? gpuDrawCallbacks.getStackHighlightActor(actor) : null;
    }
 
    private boolean isGpuPlayerOpacityActive()

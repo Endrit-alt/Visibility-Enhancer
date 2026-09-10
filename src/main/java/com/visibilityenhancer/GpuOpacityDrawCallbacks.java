@@ -5,6 +5,7 @@ import java.util.function.BiPredicate;
 import java.util.function.BooleanSupplier;
 import java.util.Set;
 import lombok.experimental.Delegate;
+import net.runelite.api.Actor;
 import net.runelite.api.GameObject;
 import net.runelite.api.Model;
 import net.runelite.api.Projection;
@@ -43,6 +44,7 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
 
    private final BiFunction<Renderable, Model, Model> prepareModel;
    private final SolidGpuCompositor solid;
+   private final StackedHighlightTracker highlights = new StackedHighlightTracker();
 
    GpuOpacityDrawCallbacks(DrawCallbacks delegate, BiFunction<Renderable, Model, Model> prepareModel)
    {
@@ -60,7 +62,18 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
 
    void close()
    {
+      highlights.beginFrame(false);
       if (solid != null) solid.close();
+   }
+
+   void beginHighlightFrame(boolean enabled)
+   {
+      highlights.beginFrame(enabled);
+   }
+
+   Actor getStackHighlightActor(Actor actor)
+   {
+      return highlights.preferredActor(actor);
    }
 
    @Override
@@ -96,7 +109,14 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
       // Players and NPCs arrive on the client thread. GPU uploads synchronously; HD ZoneRenderer
       // copies model arrays before returning when it queues asynchronous uploads.
       // Worker-thread scenery callbacks are delegated without interception.
-      Model prepared = object == null ? model : prepareModel.apply(object.getRenderable(), model);
+      Renderable renderable = object == null ? null : object.getRenderable();
+      Model prepared = object == null ? model : prepareModel.apply(renderable, model);
+      if (renderable instanceof Actor && model != null)
+      {
+         // Record the scene's chosen actor even when 0% suppresses its upload:
+         // completely hidden stacks still need one correctly selected highlight.
+         highlights.record((Actor) renderable, prepared != null);
+      }
       if (prepared != null)
       {
          if (solid != null && solid.submit(projection, scene, object, model, prepared, orientation, x, y, z)) return;

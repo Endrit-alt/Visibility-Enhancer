@@ -14,6 +14,7 @@ import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -53,9 +54,11 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private final ModelOutlineRenderer modelOutlineRenderer;
 	private final SpriteManager spriteManager;
 
-	private final Set<WorldPoint> renderedTiles = new HashSet<>();
-	private final Set<WorldPoint> renderedNpcTiles = new HashSet<>();
+	private final Set<StackedHighlightTracker.TileKey> renderedTiles = new HashSet<>();
+	private final Set<StackedHighlightTracker.TileKey> renderedNpcTiles = new HashSet<>();
 	private final List<Player> sortedGhosts = new ArrayList<>(32);
+	private final List<Player> sortedChatPlayers = new ArrayList<>(32);
+	private final OverheadTextLayout overheadTextLayout = new OverheadTextLayout();
 
 	private static final int MESSAGE_DISPLAY_DURATION_MS = 4000;
 	private static final int MESSAGE_COOLDOWN_MS = 10000;
@@ -127,8 +130,10 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 
 		Player local = client.getLocalPlayer();
-		WorldPoint localPoint = local != null ? local.getWorldLocation() : null;
 		LocalPoint localLocalPoint = local != null ? local.getLocalLocation() : null;
+		boolean hideStacked = config.hideStackedOutlines();
+		StackedHighlightTracker.TileKey localTile = StackedHighlightTracker.tileKey(local);
+		Actor localRepresentative = hideStacked && local != null ? plugin.getStackHighlightActor(local) : null;
 
 		// Thralls outlines
 		HighlightStyle thrallStyle = config.highlightThralls();
@@ -160,7 +165,8 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 		// Self outlines
 		HighlightStyle selfStyle = config.highlightSelf();
-		if (local != null && selfStyle != HighlightStyle.NONE)
+		if (local != null && selfStyle != HighlightStyle.NONE
+				&& (localRepresentative == null || localRepresentative == local))
 		{
 			Model localModel = local.getModel();
 			if (localModel == null || localModel.getOverrideAmount() == 0)
@@ -187,26 +193,25 @@ public class VisibilityEnhancerOverlay extends Overlay
 		if (othersStyle != HighlightStyle.NONE && !plugin.isPeekHeld())
 		{
 			renderedTiles.clear();
-			boolean hideStacked = config.hideStackedOutlines();
 			Color othersColor = config.othersOutlineColor();
 
 			sortedGhosts.clear();
 			sortedGhosts.addAll(plugin.getGhostedPlayers());
 
-			if (localLocalPoint != null)
+			// Stable player ID breaks distance ties when no supported renderer submitted
+			// this stack. The renderer's representative below always takes precedence.
+			sortedGhosts.sort((p1, p2) ->
 			{
-				sortedGhosts.sort((p1, p2) ->
+				LocalPoint lp1 = p1.getLocalLocation();
+				LocalPoint lp2 = p2.getLocalLocation();
+				if (localLocalPoint != null)
 				{
-					LocalPoint lp1 = p1.getLocalLocation();
-					LocalPoint lp2 = p2.getLocalLocation();
-					if (lp1 == null || lp2 == null)
-					{
-						return 0;
-					}
-
-					return Integer.compare(lp2.distanceTo(localLocalPoint), lp1.distanceTo(localLocalPoint));
-				});
-			}
+					int distance = Integer.compare(lp2 == null ? -1 : lp2.distanceTo(localLocalPoint),
+							lp1 == null ? -1 : lp1.distanceTo(localLocalPoint));
+					if (distance != 0) return distance;
+				}
+				return Integer.compare(p1.getId(), p2.getId());
+			});
 
 			for (Player player : sortedGhosts)
 			{
@@ -216,24 +221,30 @@ public class VisibilityEnhancerOverlay extends Overlay
 					continue;
 				}
 
+				StackedHighlightTracker.TileKey tile = StackedHighlightTracker.tileKey(player);
+				if (hideStacked)
+				{
+					Actor representative = plugin.getStackHighlightActor(player);
+					if (representative != null && representative != player)
+					{
+						continue;
+					}
+					if (localTile != null && localTile.equals(tile) && representative == null)
+					{
+						continue;
+					}
+					if (renderedTiles.contains(tile))
+					{
+						continue;
+					}
+				}
+
 				Model pModel = player.getModel();
 				if (pModel != null && pModel.getOverrideAmount() != 0)
 				{
 					continue;
 				}
-
-				if (hideStacked)
-				{
-					if (localPoint != null && playerPoint.equals(localPoint))
-					{
-						continue;
-					}
-					if (renderedTiles.contains(playerPoint))
-					{
-						continue;
-					}
-					renderedTiles.add(playerPoint);
-				}
+				if (hideStacked) renderedTiles.add(tile);
 
 				if (othersStyle == HighlightStyle.TILE
 						|| othersStyle == HighlightStyle.TRUE_TILE
@@ -264,81 +275,88 @@ public class VisibilityEnhancerOverlay extends Overlay
 	// Keep ground highlights in render() so scene-layer effects can still mask them.
 	Dimension renderOverheads(Graphics2D graphics)
 	{
-		if (!plugin.isActive())
+		if (!plugin.isActive() || !config.othersTransparentPrayers() || plugin.isPeekHeld())
 		{
+			overheadTextLayout.clear();
+			sortedChatPlayers.clear();
 			return null;
 		}
 
 		Player local = client.getLocalPlayer();
 		WorldPoint localPoint = local != null ? local.getWorldLocation() : null;
-		boolean othersCustomPrayers = config.othersTransparentPrayers() && !plugin.isPeekHeld();
+		Set<WorldPoint> renderedPrayerTiles = new HashSet<>();
+		overheadTextLayout.beginFrame();
+		// Projection uses the current font to center text: set it before measuring.
+		graphics.setFont(FontManager.getRunescapeBoldFont());
 
-		if (othersCustomPrayers)
+		for (Player p : client.getPlayers())
 		{
-			Set<WorldPoint> renderedPrayerTiles = new HashSet<>();
-			List<Rectangle> renderedTextBounds = new ArrayList<>();
-
-			for (Player p : client.getPlayers())
+			if (p != null && !plugin.getGhostedPlayers().contains(p))
 			{
-				if (p != null && !plugin.getGhostedPlayers().contains(p))
+				String text = p.getOverheadText();
+				if (text != null && !text.isEmpty())
 				{
-					String text = p.getOverheadText();
-					if (text != null && !text.isEmpty())
+					int zOffset = 20;
+					Point textPoint = p.getCanvasTextLocation(graphics, text, p.getLogicalHeight() + zOffset);
+					if (textPoint != null)
 					{
-						int zOffset = 20;
-						Point textPoint = p.getCanvasTextLocation(graphics, text, p.getLogicalHeight() + zOffset);
-						if (textPoint != null)
-						{
-							graphics.setFont(FontManager.getRunescapeBoldFont());
-							FontMetrics fontMetrics = graphics.getFontMetrics();
+						graphics.setFont(FontManager.getRunescapeBoldFont());
+						FontMetrics fontMetrics = graphics.getFontMetrics();
 
-							String cleanText = Text.removeTags(text);
-							int textWidth = fontMetrics.stringWidth(cleanText);
-							int textHeight = fontMetrics.getHeight();
-							int drawX = textPoint.getX() - 1;
-							int drawY = textPoint.getY() + 6;
+						String cleanText = Text.removeTags(text);
+						int textWidth = fontMetrics.stringWidth(cleanText);
+						int textHeight = fontMetrics.getHeight();
+						int drawX = textPoint.getX() - 1;
+						int drawY = textPoint.getY() + 6;
 
-							renderedTextBounds.add(new Rectangle(drawX, drawY - textHeight, textWidth, textHeight));
-						}
+						overheadTextLayout.reserve(new Rectangle(drawX, drawY - textHeight, textWidth, textHeight));
 					}
 				}
 			}
+		}
 
-			for (Player player : plugin.getGhostedPlayers())
+		// Camera/distance ordering and HashSet iteration must not determine which
+		// speaker gets moved above another speaker when their messages overlap.
+		sortedChatPlayers.clear();
+		sortedChatPlayers.addAll(plugin.getGhostedPlayers());
+		sortedChatPlayers.sort(Comparator.comparingInt(Player::getId));
+		for (Player player : sortedChatPlayers)
+		{
+			drawOverheadText(graphics, player);
+		}
+
+		for (Player player : plugin.getGhostedPlayers())
+		{
+			WorldPoint playerPoint = player.getWorldLocation();
+
+			if (playerPoint != null)
 			{
-				drawOverheadText(graphics, player, renderedTextBounds);
-
-				WorldPoint playerPoint = player.getWorldLocation();
-
-				if (playerPoint != null)
+				if (localPoint != null && playerPoint.equals(localPoint))
 				{
-					if (localPoint != null && playerPoint.equals(localPoint))
-					{
-						continue;
-					}
-
-					if (renderedPrayerTiles.contains(playerPoint))
-					{
-						continue;
-					}
-
-					renderedPrayerTiles.add(playerPoint);
+					continue;
 				}
 
-				drawTransparentPrayer(graphics, player, config.prayersOpacity());
-
-				int ratio = player.getHealthRatio();
-				int scale = player.getHealthScale();
-				if (ratio > -1 && scale > 0)
+				if (renderedPrayerTiles.contains(playerPoint))
 				{
-					drawTransparentHpBar(graphics, player, ratio, scale, config.hpBarOpacity());
+					continue;
 				}
 
-				List<VisibilityEnhancer.CustomHitsplat> hitsplats = plugin.getCustomHitsplats().get(player);
-				if (hitsplats != null && !hitsplats.isEmpty())
-				{
-					drawTransparentHitsplats(graphics, player, hitsplats, config.hitsplatsOpacity());
-				}
+				renderedPrayerTiles.add(playerPoint);
+			}
+
+			drawTransparentPrayer(graphics, player, config.prayersOpacity());
+
+			int ratio = player.getHealthRatio();
+			int scale = player.getHealthScale();
+			if (ratio > -1 && scale > 0)
+			{
+				drawTransparentHpBar(graphics, player, ratio, scale, config.hpBarOpacity());
+			}
+
+			List<VisibilityEnhancer.CustomHitsplat> hitsplats = plugin.getCustomHitsplats().get(player);
+			if (hitsplats != null && !hitsplats.isEmpty())
+			{
+				drawTransparentHitsplats(graphics, player, hitsplats, config.hitsplatsOpacity());
 			}
 		}
 
@@ -369,10 +387,12 @@ public class VisibilityEnhancerOverlay extends Overlay
 			{
 				continue;
 			}
-			WorldPoint point = npc.getWorldLocation();
-			if (hideStacked && point != null && !renderedNpcTiles.add(point))
+			StackedHighlightTracker.TileKey tile = StackedHighlightTracker.tileKey(npc);
+			if (hideStacked)
 			{
-				continue;
+				Actor representative = plugin.getStackHighlightActor(npc);
+				if (representative != null && representative != npc) continue;
+				if (tile != null && !renderedNpcTiles.add(tile)) continue;
 			}
 			if (style == HighlightStyle.TILE || style == HighlightStyle.TRUE_TILE
 					|| style == HighlightStyle.BOTH || style == HighlightStyle.BOTH_TRUE)
@@ -386,7 +406,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 	}
 
-	private void renderOutlineLayers(Player player, Color color)
+	void renderOutlineLayers(Player player, Color color)
 	{
 		if (config.enableGlow())
 		{
@@ -702,7 +722,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 	}
 
-	private void drawOverheadText(Graphics2D graphics, Player player, List<Rectangle> renderedTextBounds)
+	private void drawOverheadText(Graphics2D graphics, Player player)
 	{
 		String text = player.getOverheadText();
 		if (text == null || text.isEmpty())
@@ -764,27 +784,9 @@ public class VisibilityEnhancerOverlay extends Overlay
 		int drawX = textPoint.getX() - 1;
 		int drawY = textPoint.getY() + 6;
 
-		Rectangle currentBounds = new Rectangle(drawX, drawY - textHeight, textWidth, textHeight);
-
-		boolean isOverlapping = true;
-		while (isOverlapping)
-		{
-			isOverlapping = false;
-			for (Rectangle drawnBounds : renderedTextBounds)
-			{
-				if (currentBounds.intersects(drawnBounds))
-				{
-					drawY -= (textHeight + 2);
-					currentBounds.setLocation(drawX, drawY - textHeight);
-					isOverlapping = true;
-					break;
-				}
-			}
-		}
-
-		renderedTextBounds.add(currentBounds);
-
-		Point adjustedPoint = new Point(drawX, drawY);
+		Rectangle bounds = overheadTextLayout.place(player,
+				new Rectangle(drawX, drawY - textHeight, textWidth, textHeight));
+		Point adjustedPoint = new Point(bounds.x, bounds.y + textHeight);
 		OverlayUtil.renderTextLocation(graphics, adjustedPoint, displayText, Color.YELLOW);
 	}
 
