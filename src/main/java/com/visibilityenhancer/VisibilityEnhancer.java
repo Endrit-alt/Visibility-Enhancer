@@ -366,7 +366,6 @@ public class VisibilityEnhancer extends Plugin
    protected void startUp()
    {
       migrateNpcOpacityDefault();
-      pendingPlayerUpdates.clear();
       overlayManager.add(overlay);
       overlayManager.add(overheadOverlay);
       overlayManager.add(outlineOverlay);
