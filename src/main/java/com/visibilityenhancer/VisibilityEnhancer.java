@@ -14,6 +14,7 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.*;
 import net.runelite.api.gameval.NpcID;
+import net.runelite.api.gameval.SpotanimID;
 import net.runelite.api.kit.KitType;
 import net.runelite.api.hooks.DrawCallbacks;
 import net.runelite.client.callback.ClientThread;
@@ -218,6 +219,10 @@ public class VisibilityEnhancer extends Plugin
            1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598 //2
    );
 
+   private static final Set<Integer> EXEMPT_PROJECTILE_IDS = ImmutableSet.of(
+           SpotanimID.TOB_SOTETSEG_SHAREDATTACK
+   );
+
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
            //12613, // ToB Maiden
            //13123, 13379, // ToB Sote
@@ -337,7 +342,7 @@ public class VisibilityEnhancer extends Plugin
            .add(2132, 2133, 2134, 2135 ,2136, 2137, 2138, 2139) //Sight Monkey Room
            .add(1568, 1569, 1570, 1571, 1572, 1573) //bloat
            .add(246, 1349, 1350, 1351, 1352, 1353, 1354, 1355, 1356, 1357, 1358, 1359, 1360, 1361, 1362, 1363) //olm
-           .add(1604, 1605) //sotesegg
+           .add(SpotanimID.TOB_SOTETSEG_SHAREDATTACK, SpotanimID.TOB_SOTETSEG_SHAREDATTACK_IMPACT) // Sotetseg shared attack
            .add (1997, 1998, 2002, 2003) //nex
            .add (2197, 2198, 2199, 2200, 2203) //wardens
            .build();
@@ -641,7 +646,7 @@ public class VisibilityEnhancer extends Plugin
          boolean activelyHasCriticalGraphic = false;
          int currentGraphic = p.getGraphic();
 
-         if (currentGraphic != -1 && CRITICAL_SPOTANIMS.contains(currentGraphic))
+         if (currentGraphic != -1 && isCriticalSpotAnim(currentGraphic))
          {
             activelyHasCriticalGraphic = true;
          }
@@ -649,7 +654,7 @@ public class VisibilityEnhancer extends Plugin
          {
             for (ActorSpotAnim spotAnim : p.getSpotAnims())
             {
-               if (CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
+               if (isCriticalSpotAnim(spotAnim.getId()))
                {
                   activelyHasCriticalGraphic = true;
                   break;
@@ -727,7 +732,7 @@ public class VisibilityEnhancer extends Plugin
             spotAnimKeysToRemove.clear();
             for (ActorSpotAnim spotAnim : spotAnims)
             {
-               if (!CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
+               if (!isCriticalSpotAnim(spotAnim.getId()))
                {
                   // getId identifies the effect; getHash identifies its actor-table entry.
                   spotAnimKeysToRemove.add((int) spotAnim.getHash());
@@ -1148,7 +1153,7 @@ public class VisibilityEnhancer extends Plugin
       {
          for (Projectile proj : client.getProjectiles())
          {
-            if (TRANS_NULL_IDS.contains(proj.getId()))
+            if (isProjectileExempt(proj.getId()))
             {
                continue; // Forces the plugin to skip it, just like trans == null
             }
@@ -1236,6 +1241,37 @@ public class VisibilityEnhancer extends Plugin
       }
    }
 
+   static boolean isProjectileExempt(int projectileId)
+   {
+      return TRANS_NULL_IDS.contains(projectileId)
+              || EXEMPT_PROJECTILE_IDS.contains(projectileId);
+   }
+
+   static boolean isCriticalSpotAnim(int spotAnimId)
+   {
+      return CRITICAL_SPOTANIMS.contains(spotAnimId);
+   }
+
+   static boolean shouldDrawProjectile(
+           int projectileId,
+           boolean hasTarget,
+           boolean targetsLocalPlayer,
+           boolean landsNearLocalPlayer,
+           boolean forceOpaque,
+           boolean isMyProjectile)
+   {
+      if (isProjectileExempt(projectileId))
+      {
+         return true;
+      }
+
+      return !hasTarget
+              || targetsLocalPlayer
+              || landsNearLocalPlayer
+              || forceOpaque
+              || isMyProjectile;
+   }
+
    private boolean shouldDraw(Renderable renderable, boolean drawingUI)
    {
       if (!isActive())
@@ -1247,11 +1283,6 @@ public class VisibilityEnhancer extends Plugin
       {
          Projectile proj = (Projectile) renderable;
 
-         if (TRANS_NULL_IDS.contains(proj.getId()))
-         {
-            return true;
-         }
-
          if (RESTRICTED_PROJECTILE_REGIONS.contains(currentRegionId)
                  || client.getPlayers().size() <= 1
                  || client.getVarbitValue(Varbits.IN_RAID) == 1)
@@ -1260,11 +1291,15 @@ public class VisibilityEnhancer extends Plugin
          }
 
          Actor target = proj.getTargetActor();
-         return target == null
-                 || isLocalPlayerTarget(target, cachedLocalPlayer)
-                 || isProjectileLandingNearLocal(proj, cachedLocalPlayer)
-                 || forceOpaqueProjectiles.contains(proj)
-                 || myProjectiles.contains(proj);
+
+         return shouldDrawProjectile(
+                 proj.getId(),
+                 target != null,
+                 target != null && isLocalPlayerTarget(target, cachedLocalPlayer),
+                 isProjectileLandingNearLocal(proj, cachedLocalPlayer),
+                 forceOpaqueProjectiles.contains(proj),
+                 myProjectiles.contains(proj)
+         );
       }
 
       if (renderable instanceof Player)
