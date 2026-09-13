@@ -141,7 +141,10 @@ public class VisibilityEnhancer extends Plugin
 
    private Player cachedLocalPlayer;
    private final List<Player> inRange = new ArrayList<>();
-   private final Set<Player> currentInRange = new HashSet<>();
+   // Desired selection is cheap to refresh; ghostedPlayers contains only players
+   // whose setup has actually completed. Keep queued work ordered across ticks.
+   private final Set<Player> currentInRange = new LinkedHashSet<>();
+   private final Set<Player> pendingPlayerUpdates = new LinkedHashSet<>();
    private final Set<Player> noLongerGhosted = new HashSet<>();
 
    private boolean wasActive = false;
@@ -337,6 +340,7 @@ public class VisibilityEnhancer extends Plugin
 
    // Whitelist for critical SpotAnims/Graphics (the visual effects themselves)
    private static final Set<Integer> CRITICAL_SPOTANIMS = ImmutableSet.<Integer>builder()
+           .add(SpotanimID.LEVELUP_ANIM, SpotanimID.LEVELUP_99_ANIM, SpotanimID.LEVELUP_MAX) //Level-up fireworks
            //SpotanimID.java
            .add(2145, 2146, 317) //Kephri dung
            .add(2132, 2133, 2134, 2135 ,2136, 2137, 2138, 2139) //Sight Monkey Room
@@ -362,6 +366,7 @@ public class VisibilityEnhancer extends Plugin
    protected void startUp()
    {
       migrateNpcOpacityDefault();
+      pendingPlayerUpdates.clear();
       overlayManager.add(overlay);
       overlayManager.add(overheadOverlay);
       overlayManager.add(outlineOverlay);
@@ -623,7 +628,9 @@ public class VisibilityEnhancer extends Plugin
       criticalGraphicPlayers.clear();
       culledPlayers.clear();
 
-      List<Player> playersToCheck = new ArrayList<>(currentInRange);
+      // New arrivals stay native-visible until admitted by the per-frame queue.
+      // Safety checks for already affected players must never wait in that queue.
+      List<Player> playersToCheck = new ArrayList<>(ghostedPlayers);
       if (cachedLocalPlayer != null)
       {
          playersToCheck.add(cachedLocalPlayer);
@@ -634,70 +641,15 @@ public class VisibilityEnhancer extends Plugin
 
       for (Player p : playersToCheck)
       {
-         // Player interactions also include Follow and Trade. Only NPC targets
-         // count here; player combat is still detected by animations and hitsplats.
-         Actor target = p.getInteracting();
-         if (target instanceof NPC && target.getCombatLevel() > 0)
-         {
-            combatTimerMap.put(p, currentTick);
-         }
-
-         // --- 2. Critical Graphic Check ---
-         boolean activelyHasCriticalGraphic = false;
-         int currentGraphic = p.getGraphic();
-
-         if (currentGraphic != -1 && isCriticalSpotAnim(currentGraphic))
-         {
-            activelyHasCriticalGraphic = true;
-         }
-         else if (p.getSpotAnims() != null)
-         {
-            for (ActorSpotAnim spotAnim : p.getSpotAnims())
-            {
-               if (isCriticalSpotAnim(spotAnim.getId()))
-               {
-                  activelyHasCriticalGraphic = true;
-                  break;
-               }
-            }
-         }
-
-         if (activelyHasCriticalGraphic)
-         {
-            lastCriticalGraphicCycleMap.put(p, currentCycle);
-         }
-
-         Integer lastGraphicCycle = lastCriticalGraphicCycleMap.get(p);
-         boolean hasCriticalGraphic = lastGraphicCycle != null &&
-                 (currentCycle - lastGraphicCycle <= CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES);
-
-         if (hasCriticalGraphic)
-         {
-            criticalGraphicPlayers.add(p);
-         }
-
-         // --- 3. Forced Override Check ---
-         Model model = p.getModel();
-         boolean hasOverride = shouldForceOpaqueForOverride(p, model);
-
-         if (hasCriticalGraphic || hasOverride)
-         {
-            exemptPlayers.add(p);
-         }
-
-         // --- 4. Distance Math & 0% Cull Check ---
-         int opacity = getEffectiveOpacity(p);
-
-         if (!isGpuPlayerOpacityActive() && opacity == 0 && !exemptPlayers.contains(p))
-         {
-            culledPlayers.add(p);
-         }
+         updatePlayerSafety(p, currentCycle, currentTick);
       }
 
       // --- Rest of tick logic ---
-      if (config.distanceBasedOpacity() && !peekHeld)
+      // GPU/HD evaluate distance on the exact draw model; legacy alpha mutation
+      // is still updated promptly for already-admitted players on that fallback.
+      if (!isGpuPlayerOpacityActive() && config.distanceBasedOpacity() && !peekHeld)
       {
-         for (Player p : currentInRange)
+         for (Player p : ghostedPlayers)
          {
             if (shouldHideWithFallback(p))
             {
@@ -745,6 +697,58 @@ public class VisibilityEnhancer extends Plugin
                p.removeSpotAnim(key);
             }
          }
+      }
+   }
+
+   private void updatePlayerSafety(Player player, int currentCycle, int currentTick)
+   {
+      // Follow/Trade are not combat; retain the existing NPC-target criterion.
+      Actor target = player.getInteracting();
+      if (target instanceof NPC && target.getCombatLevel() > 0)
+      {
+         combatTimerMap.put(player, currentTick);
+      }
+
+      boolean hasGraphic = isCriticalSpotAnim(player.getGraphic());
+      if (!hasGraphic && player.getSpotAnims() != null)
+      {
+         for (ActorSpotAnim spotAnim : player.getSpotAnims())
+         {
+            if (isCriticalSpotAnim(spotAnim.getId()))
+            {
+               hasGraphic = true;
+               break;
+            }
+         }
+      }
+      if (hasGraphic) lastCriticalGraphicCycleMap.put(player, currentCycle);
+      Integer lastGraphic = lastCriticalGraphicCycleMap.get(player);
+      boolean protectedGraphic = lastGraphic != null
+              && currentCycle - lastGraphic <= CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES;
+      if (protectedGraphic) criticalGraphicPlayers.add(player);
+      else criticalGraphicPlayers.remove(player);
+
+      Model model = player.getModel();
+      boolean hasOverride = shouldForceOpaqueForOverride(player, model);
+      if (protectedGraphic || hasOverride) exemptPlayers.add(player);
+      else exemptPlayers.remove(player);
+
+      // Reuse this exact model instead of rebuilding it again for the same check.
+      int opacity = getEffectiveOpacity(player, model);
+      if (!isGpuPlayerOpacityActive() && opacity == 0 && !exemptPlayers.contains(player))
+      {
+         culledPlayers.add(player);
+      }
+      else
+      {
+         culledPlayers.remove(player);
+      }
+
+      // Restoring a mechanic must not wait behind ordinary queued updates.
+      if (hasOverride)
+      {
+         restoreOpacity(player);
+         restoreClothing(player);
       }
    }
 
@@ -820,6 +824,8 @@ public class VisibilityEnhancer extends Plugin
    public void onPlayerDespawned(PlayerDespawned event)
    {
       Player p = event.getPlayer();
+      pendingPlayerUpdates.remove(p);
+      currentInRange.remove(p);
 
       if (ghostedPlayers.contains(p) || originalEquipmentMap.containsKey(p))
       {
@@ -856,6 +862,8 @@ public class VisibilityEnhancer extends Plugin
    {
       if (event.getGameState() != GameState.LOGGED_IN)
       {
+         // Never admit work selected for a scene that is being unloaded.
+         pendingPlayerUpdates.clear();
          // Renderer callbacks must keep their identity through loading, but these
          // per-NPC views need not retain actors from a previous scene/world.
          gpuNpcModels.clear();
@@ -900,7 +908,7 @@ public class VisibilityEnhancer extends Plugin
 
       if (ghostedPlayers.contains(p))
       {
-         updateGhostedPlayer(p, config.othersClearGround());
+         pendingPlayerUpdates.add(p);
       }
    }
 
@@ -963,10 +971,6 @@ public class VisibilityEnhancer extends Plugin
 
          if (isFriend)
          {
-            if (ghostedPlayers.contains(p))
-            {
-               restorePlayer(p);
-            }
             continue;
          }
 
@@ -1072,29 +1076,7 @@ public class VisibilityEnhancer extends Plugin
          restoreClothing(local);
       }
 
-      noLongerGhosted.clear();
-
-      updatePlayersInRange();
-
-      gpuPlayerModels.keySet().removeIf(p -> p != local && !currentInRange.contains(p));
-
-      boolean hideOthersClothes = config.othersClearGround();
-
-      for (Player p : currentInRange)
-      {
-         updateGhostedPlayer(p, hideOthersClothes);
-      }
-
-      noLongerGhosted.addAll(ghostedPlayers);
-      noLongerGhosted.removeAll(currentInRange);
-
-      for (Player p : noLongerGhosted)
-      {
-         restorePlayer(p);
-      }
-
-      ghostedPlayers.clear();
-      ghostedPlayers.addAll(currentInRange);
+      refreshPlayerUpdateQueue();
    }
 
    @Subscribe
@@ -1121,6 +1103,8 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
+
+      processNextPlayerUpdate();
 
       int selfOpacity = getEffectiveOpacity(local);
 
@@ -1556,16 +1540,43 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
+      refreshPlayerUpdateQueue();
+   }
+
+   private void refreshPlayerUpdateQueue()
+   {
       updatePlayersInRange();
+      pendingPlayerUpdates.retainAll(currentInRange);
+      gpuPlayerModels.keySet().removeIf(p -> p != client.getLocalPlayer() && !currentInRange.contains(p));
 
-      boolean hideOthersClothes = config.othersClearGround();
-
-      for (Player p : currentInRange)
+      // Exiting selection restores immediately, never leaves someone faded while
+      // waiting behind new arrivals. Only ordinary setup/refresh is amortized.
+      noLongerGhosted.clear();
+      noLongerGhosted.addAll(ghostedPlayers);
+      noLongerGhosted.removeAll(currentInRange);
+      for (Player player : noLongerGhosted)
       {
-         updateGhostedPlayer(p, hideOthersClothes);
+         restorePlayer(player);
+         ghostedPlayers.remove(player);
       }
 
-      ghostedPlayers.addAll(currentInRange);
+      // LinkedHashSet deduplicates without moving waiting players to the back.
+      // Rebuilding this queue every tick would starve its tail at low FPS.
+      pendingPlayerUpdates.addAll(currentInRange);
+   }
+
+   private void processNextPlayerUpdate()
+   {
+      if (!gpuOpacityEnabled || pendingPlayerUpdates.isEmpty()) return;
+      Iterator<Player> iterator = pendingPlayerUpdates.iterator();
+      Player player = iterator.next();
+      iterator.remove();
+      if (!currentInRange.contains(player)) return;
+
+      // Check attached mechanics before the first opacity/culling decision.
+      updatePlayerSafety(player, client.getGameCycle(), client.getTickCount());
+      updateGhostedPlayer(player, config.othersClearGround());
+      ghostedPlayers.add(player);
    }
 
    private void checkStateTransition()
@@ -2011,6 +2022,7 @@ public class VisibilityEnhancer extends Plugin
          return true;
       }
       if (overlay != null) overlay.clearPendingOutlines();
+      pendingPlayerUpdates.clear();
       if (!detachGpuDrawCallbacks())
       {
          return false;
@@ -2167,6 +2179,12 @@ public class VisibilityEnhancer extends Plugin
       // Use the exact model the renderer is about to upload. Calling player.getModel()
       // here could rebuild a shared animation model and overwrite this one.
       int opacity = getEffectiveOpacity(player, model);
+      // Pending newcomers retain their native body/UI. Still observe overrides
+      // above using the provided render model, without rebuilding actor geometry.
+      if (player != client.getLocalPlayer() && !ghostedPlayers.contains(player))
+      {
+         return model;
+      }
       if (opacity >= 100)
       {
          return model;
@@ -2324,6 +2342,9 @@ public class VisibilityEnhancer extends Plugin
       overrideLastSeenCycle.remove(p);
       overrideForcedPlayers.remove(p);
 
+      // Selection exits must also undo legacy scene culling immediately.
+      culledPlayers.remove(p);
+
       PlayerComposition comp = p.getPlayerComposition();
       if (comp != null)
       {
@@ -2349,6 +2370,7 @@ public class VisibilityEnhancer extends Plugin
       }
 
       ghostedPlayers.clear();
+      pendingPlayerUpdates.clear();
       fallbackHiddenPlayers.clear();
       inRange.clear();
       currentInRange.clear();
