@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Pattern;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Actor;
@@ -66,6 +67,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private static final int MESSAGE_DISPLAY_DURATION_MS = 4000;
 	private static final int MESSAGE_COOLDOWN_MS = 10000;
 	private static final int FAST_TYPING_COOLDOWN_MS = 1000;
+	private static final Pattern TRADE_MESSAGE_PATTERN = Pattern.compile("\\b(?:buying|selling)\\b", Pattern.CASE_INSENSITIVE);
 
 	private static final String[] WOO_MESSAGES = {
 			"Wooo wooo wooooo",
@@ -770,7 +772,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private void drawOverheadText(Graphics2D graphics, Player player)
 	{
 		String text = player.getOverheadText();
-		if (text == null || text.isEmpty())
+		if (text == null || text.isEmpty() || TRADE_MESSAGE_PATTERN.matcher(text).find())
 		{
 			return;
 		}
