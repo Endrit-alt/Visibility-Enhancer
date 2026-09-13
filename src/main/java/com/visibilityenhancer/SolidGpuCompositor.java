@@ -33,8 +33,7 @@ import static org.lwjgl.opengl.GL33C.*;
 @Slf4j
 final class SolidGpuCompositor
 {
-   private static final int MAX_ACTORS = 24;
-   private static final int MAX_FRAME_BYTES = 4 * 1024 * 1024;
+   private static final int MAX_FRAME_BYTES = 10 * 1024 * 1024;
    private static final long MAX_TARGET_BYTES = 128L * 1024 * 1024;
    private static final float[] IDENTITY = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
    private static final float[] CLEAR_DEPTH = {0};
@@ -157,8 +156,7 @@ final class SolidGpuCompositor
       try
       {
          String unavailable = scene == null || scene.getWorldViewId() != WorldView.TOPLEVEL ? "SUB_WORLDVIEW"
-                 : frameScene == null ? frameRejection : scene != frameScene ? "SCENE_MISMATCH"
-                 : actors.size() >= MAX_ACTORS ? "ACTOR_LIMIT" : null;
+                 : frameScene == null ? frameRejection : scene != frameScene ? "SCENE_MISMATCH" : null;
          if (unavailable != null) { report(renderable, original, unavailable); return false; }
          long bytes = (long) original.getFaceCount() * 3 * SolidOpacityMesh.STRIDE * Integer.BYTES;
          if (bytes > MAX_FRAME_BYTES - frameBytes) { report(renderable, original, "FRAME_MESH_BUDGET"); return false; }

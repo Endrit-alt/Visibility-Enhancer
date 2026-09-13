@@ -281,6 +281,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	// Keep ground highlights in render() so scene-layer effects can still mask them.
 	Dimension renderOverheads(Graphics2D graphics)
 	{
+		plugin.pruneCustomHitsplats();
 		if (!plugin.isActive() || !config.othersTransparentPrayers() || plugin.isPeekHeld())
 		{
 			overheadTextLayout.clear();
@@ -300,6 +301,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 			if (p != null && !plugin.getGhostedPlayers().contains(p))
 			{
 				String text = p.getOverheadText();
+				if (text != null) text = Text.unescapeJagex(text);
 				if (text != null && !text.isEmpty())
 				{
 					int zOffset = 20;
@@ -309,8 +311,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 						graphics.setFont(FontManager.getRunescapeBoldFont());
 						FontMetrics fontMetrics = graphics.getFontMetrics();
 
-						String cleanText = Text.removeTags(text);
-						int textWidth = fontMetrics.stringWidth(cleanText);
+						int textWidth = fontMetrics.stringWidth(text);
 						int textHeight = fontMetrics.getHeight();
 						int drawX = textPoint.getX() - 1;
 						int drawY = textPoint.getY() + 6;
@@ -748,9 +749,8 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 			if (bgAlpha > 0)
 			{
-				Color backColor = hit.getAmount() == 0
-						? new Color(50, 90, 160, bgAlpha)
-						: new Color(180, 40, 40, bgAlpha);
+				Color typeColor = HitsplatStyle.colorFor(hit.getType(), hit.getAmount());
+				Color backColor = new Color(typeColor.getRed(), typeColor.getGreen(), typeColor.getBlue(), bgAlpha);
 				graphics.setColor(backColor);
 				graphics.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 2, 2);
 			}
@@ -777,8 +777,9 @@ public class VisibilityEnhancerOverlay extends Overlay
 			return;
 		}
 
-		// Convert engine-escaped brackets back to normal symbols
-		text = text.replace("<lt>", "<").replace("<gt>", ">");
+		// Decode printable tags (including <at>) once, before projection and drawing.
+		text = Text.unescapeJagex(text);
+		if (text.isEmpty()) return;
 
 		SpamTracker tracker = spamTrackerMap.computeIfAbsent(player, p -> new SpamTracker());
 		Instant now = Instant.now();
@@ -824,8 +825,8 @@ public class VisibilityEnhancerOverlay extends Overlay
 		graphics.setFont(FontManager.getRunescapeBoldFont());
 		FontMetrics fontMetrics = graphics.getFontMetrics();
 
-		String cleanText = Text.removeTags(displayText);
-		int textWidth = fontMetrics.stringWidth(cleanText);
+		// Already decoded: stripping tags again would erase literal bracketed text.
+		int textWidth = fontMetrics.stringWidth(displayText);
 		int textHeight = fontMetrics.getHeight();
 
 		int drawX = textPoint.getX() - 1;

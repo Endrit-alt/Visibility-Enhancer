@@ -351,8 +351,9 @@ public class VisibilityEnhancer extends Plugin
    @AllArgsConstructor
    public static class CustomHitsplat
    {
+      private final int type;
       private final int amount;
-      private final int despawnTick;
+      private final int disappearsOnGameCycle;
    }
 
    @Getter
@@ -525,21 +526,32 @@ public class VisibilityEnhancer extends Plugin
       if (event.getActor() instanceof Player)
       {
          Player p = (Player) event.getActor();
+         Hitsplat hitsplat = event.getHitsplat();
+         if (hitsplat == null) return;
 
-         // --- NEW: They took damage, so they are in combat ---
-         combatTimerMap.put(p, client.getTickCount());
+         // A blocked attack still counts, even when zero hitsplats are hidden. Healing,
+         // stat/resource changes and unknown types are not evidence of incoming damage.
+         if (HitsplatStyle.isCombatHit(hitsplat.getHitsplatType()))
+         {
+            combatTimerMap.put(p, client.getTickCount());
+         }
 
          if (config.othersTransparentPrayers() && ghostedPlayers.contains(p))
          {
-            int amount = event.getHitsplat().getAmount();
+            int amount = hitsplat.getAmount();
+            int currentCycle = client.getGameCycle();
+            int disappearsOnGameCycle = hitsplat.getDisappearsOnGameCycle();
 
-            if (amount == 0 && config.hideZeroHitsplats())
+            if (hitsplat.getHitsplatType() < 0 || disappearsOnGameCycle <= currentCycle
+                    || (amount == 0 && config.hideZeroHitsplats()))
             {
                return;
             }
 
             List<CustomHitsplat> list = customHitsplats.computeIfAbsent(p, k -> new ArrayList<>());
-            CustomHitsplat newHit = new CustomHitsplat(amount, client.getTickCount() + 4);
+            list.removeIf(h -> currentCycle >= h.getDisappearsOnGameCycle());
+            // Copy values: do not retain a client-owned hitsplat that may be reused.
+            CustomHitsplat newHit = new CustomHitsplat(hitsplat.getHitsplatType(), amount, disappearsOnGameCycle);
 
             if (list.size() < 4)
             {
@@ -560,14 +572,14 @@ public class VisibilityEnhancer extends Plugin
                         targetIndex = i;
                         foundZero = true;
                      }
-                     else if (h.getDespawnTick() < list.get(targetIndex).getDespawnTick())
+                     else if (h.getDisappearsOnGameCycle() < list.get(targetIndex).getDisappearsOnGameCycle())
                      {
                         targetIndex = i;
                      }
                   }
                   else if (!foundZero)
                   {
-                     if (targetIndex == -1 || h.getDespawnTick() < list.get(targetIndex).getDespawnTick())
+                     if (targetIndex == -1 || h.getDisappearsOnGameCycle() < list.get(targetIndex).getDisappearsOnGameCycle())
                      {
                         targetIndex = i;
                      }
@@ -586,6 +598,24 @@ public class VisibilityEnhancer extends Plugin
             }
          }
       }
+   }
+
+   // Called before overhead layout as well as on game ticks, so expired hits neither
+   // draw nor reserve a layout slot while waiting for the next server tick.
+   void pruneCustomHitsplats()
+   {
+      if (customHitsplats.isEmpty()) return;
+      if (!isActive() || !config.othersTransparentPrayers())
+      {
+         customHitsplats.clear();
+         return;
+      }
+      int currentCycle = client.getGameCycle();
+      customHitsplats.values().removeIf(list ->
+      {
+         list.removeIf(h -> currentCycle >= h.getDisappearsOnGameCycle());
+         return list.isEmpty();
+      });
    }
 
    @Subscribe
@@ -860,6 +890,7 @@ public class VisibilityEnhancer extends Plugin
       {
          // Never admit work selected for a scene that is being unloaded.
          pendingPlayerUpdates.clear();
+         customHitsplats.clear();
          // Renderer callbacks must keep their identity through loading, but these
          // per-NPC views need not retain actors from a previous scene/world.
          gpuNpcModels.clear();
@@ -1053,15 +1084,7 @@ public class VisibilityEnhancer extends Plugin
       myProjectiles.removeIf(p -> client.getGameCycle() >= p.getEndCycle());
       forceOpaqueProjectiles.removeIf(p -> client.getGameCycle() >= p.getEndCycle());
 
-      if (config.othersTransparentPrayers())
-      {
-         customHitsplats.values().forEach(list ->
-                 list.removeIf(h -> client.getTickCount() >= h.getDespawnTick()));
-      }
-      else
-      {
-         customHitsplats.clear();
-      }
+      pruneCustomHitsplats();
 
       if (config.selfClearGround())
       {
