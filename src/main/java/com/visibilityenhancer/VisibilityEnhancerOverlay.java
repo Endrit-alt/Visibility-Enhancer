@@ -43,7 +43,6 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.OverlayPriority;
 import net.runelite.client.ui.overlay.OverlayUtil;
-import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.Text;
 
 @Singleton
@@ -52,7 +51,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private final Client client;
 	private final VisibilityEnhancer plugin;
 	private final VisibilityEnhancerConfig config;
-	private final ModelOutlineRenderer modelOutlineRenderer;
+	private final VisibilityOutlineRenderer modelOutlineRenderer;
 	private final SpriteManager spriteManager;
 
 	private final Set<StackedHighlightTracker.TileKey> renderedTiles = new HashSet<>();
@@ -112,7 +111,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 			Client client,
 			VisibilityEnhancer plugin,
 			VisibilityEnhancerConfig config,
-			ModelOutlineRenderer modelOutlineRenderer,
+			VisibilityOutlineRenderer modelOutlineRenderer,
 			SpriteManager spriteManager)
 	{
 		this.client = client;
@@ -456,26 +455,16 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 	void renderOutlineLayers(Player player, Color color)
 	{
-		if (config.enableGlow())
-		{
-			modelOutlineRenderer.drawOutline(player, config.glowWidth(), color, config.glowFeather());
-		}
-		if (config.enableOutline())
-		{
-			modelOutlineRenderer.drawOutline(player, config.outlineWidth(), color, config.outlineFeather());
-		}
+		modelOutlineRenderer.drawOutlineLayers(player, color,
+			config.enableGlow() ? config.glowWidth() : 0, config.glowFeather(),
+			config.enableOutline() ? config.outlineWidth() : 0, config.outlineFeather());
 	}
 
 	void renderOutlineLayers(NPC npc, Color color)
 	{
-		if (config.enableGlow())
-		{
-			modelOutlineRenderer.drawOutline(npc, config.glowWidth(), color, config.glowFeather());
-		}
-		if (config.enableOutline())
-		{
-			modelOutlineRenderer.drawOutline(npc, config.outlineWidth(), color, config.outlineFeather());
-		}
+		modelOutlineRenderer.drawOutlineLayers(npc, color,
+			config.enableGlow() ? config.glowWidth() : 0, config.glowFeather(),
+			config.enableOutline() ? config.outlineWidth() : 0, config.outlineFeather());
 	}
 
 	void renderFloorTile(Graphics2D graphics, Actor actor, Color color, HighlightStyle style)
