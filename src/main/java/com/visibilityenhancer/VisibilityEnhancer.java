@@ -219,7 +219,8 @@ public class VisibilityEnhancer extends Plugin
 
    private static final Set<Integer> TRANS_NULL_IDS = ImmutableSet.of(
            2204, 2206, 2208, 2224, 2241,  2253, 2255, 2237, 2238, 2244, //1
-           1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598 //2
+           1577, 1578, 1568, 1569, 1375, 1555, 1580, 1586, 1583, 1585, 1591, 1593, 1594, 1601, 1596, 1598, //2
+           1604
    );
 
    private static final Set<Integer> RESTRICTED_PROJECTILE_REGIONS = ImmutableSet.of(
