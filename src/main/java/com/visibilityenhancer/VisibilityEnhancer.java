@@ -22,7 +22,6 @@ import net.runelite.client.callback.Hooks;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
-import net.runelite.client.events.ProfileChanged;
 import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -44,7 +43,6 @@ public class VisibilityEnhancer extends Plugin
    private static final int OVERRIDE_CLEAR_DELAY_CYCLES = 30;
    private static final int CRITICAL_GRAPHIC_GRACE_PERIOD_CYCLES = 120;
    private static final int COX_MAX_AFFECTED_PLAYERS = 16;
-   private static final String NPC_OPACITY_20_MIGRATION_KEY = "npcOpacity20Migrated";
 
    private final Map<Player, Integer> lastCombatCycleMap = new HashMap<>();
    private static final int COMBAT_TIMEOUT_CYCLES = 300; // 10 game ticks of "memory"
@@ -358,7 +356,6 @@ public class VisibilityEnhancer extends Plugin
    @Override
    protected void startUp()
    {
-      migrateNpcOpacityDefault();
       pendingPlayerUpdates.clear();
       overlayManager.add(overlay);
       overlayManager.add(overheadOverlay);
@@ -388,34 +385,6 @@ public class VisibilityEnhancer extends Plugin
             }
          }
       }
-   }
-
-   private void migrateNpcOpacityDefault()
-   {
-      // Keep the value and completion marker on the same active config profile.
-      synchronized (configManager)
-      {
-         if ("true".equals(configManager.getConfiguration("visibilityenhancer", NPC_OPACITY_20_MIGRATION_KEY)))
-         {
-            return;
-         }
-
-         Integer opacity = configManager.getConfiguration("visibilityenhancer", "npcOpacity", Integer.class);
-         if (Integer.valueOf(10).equals(opacity))
-         {
-            configManager.setConfiguration("visibilityenhancer", "npcOpacity", 20);
-         }
-
-         // Unannotated internal key: resetting visible settings must not rerun the migration.
-         // Mark every profile, including new ones, so later choices of 10% are respected.
-         configManager.setConfiguration("visibilityenhancer", NPC_OPACITY_20_MIGRATION_KEY, true);
-      }
-   }
-
-   @Subscribe
-   public void onProfileChanged(ProfileChanged event)
-   {
-      migrateNpcOpacityDefault();
    }
 
    @Override
