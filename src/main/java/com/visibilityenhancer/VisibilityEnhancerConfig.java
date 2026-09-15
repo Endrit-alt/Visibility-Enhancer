@@ -75,15 +75,6 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default String npcOpacityInclusions() { return "Sotetseg,"; }
 
-	@ConfigItem(
-			keyName = "disableSolidTransparency",
-			name = "Disable Solid Transparency",
-			position = 10,
-			section = opacitySection,
-			description = "Use ordinary transparency for lower GPU load. Normal GPU only."
-	)
-	default boolean disableSolidTransparency() { return false; }
-
 	@Range(min = 1, max = 50)
 	@ConfigItem(
 			keyName = "proximityRange",
