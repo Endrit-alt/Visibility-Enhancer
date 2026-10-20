@@ -232,7 +232,8 @@ public class VisibilityEnhancer extends Plugin
            13210, // Scurrius
            5939, // Hueycotl
            15515, // Nightmare
-            13106 // Zalcano
+           13106, // Zalcano
+           16213, 16214, 16215, 16216, 16217, 16469, 16470, 16471, 16472, 16473, 16725, 16726, 16727, 16728, 16729, 16981, 16982, 16983, 16984, 16985, 17237, 17238, 17239, 17240, 17241 //TFA
    );
 
    private static final Set<Integer> EXEMPT_ANIMATIONS = ImmutableSet.<Integer>builder()
