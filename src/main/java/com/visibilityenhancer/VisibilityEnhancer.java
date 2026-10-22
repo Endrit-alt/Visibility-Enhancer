@@ -340,6 +340,7 @@ public class VisibilityEnhancer extends Plugin
            .add(1604, 1605) //sotesegg
            .add (1997, 1998, 2002, 2003) //nex
            .add (2197, 2198, 2199, 2200, 2203) //wardens
+           .add (4290, 4291, 4292)
            .build();
 
    @Getter
