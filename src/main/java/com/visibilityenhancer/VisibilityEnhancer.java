@@ -125,6 +125,7 @@ public class VisibilityEnhancer extends Plugin
    // NEW Sets to manage logic for ALL players simultaneously
    private final Map<Player, Integer> lastCriticalGraphicCycleMap = new HashMap<>();
    private final Set<Player> criticalGraphicPlayers = new HashSet<>();
+   private final Set<Player> opaqueSpotAnimPlayers = new HashSet<>();
    private final Set<Player> exemptPlayers = new HashSet<>();
    private final Set<Player> culledPlayers = new HashSet<>();
 
@@ -329,8 +330,15 @@ public class VisibilityEnhancer extends Plugin
            NpcID.CRYSTAL_HUNLLEF_CRYSTALS_ECHO_CRYSTALS // Echo Hunllef tornado
    );
 
+   // Code-only opt-in: add chosen IDs with .add(id1, id2). Empty means disabled.
+   // Preserve native opacity only while a selected effect is present (no grace).
+   private static final Set<Integer> FORCE_OPAQUE_SPOTANIMS = ImmutableSet.<Integer>builder()
+           .add(4290, 4291, 4292)
+           .build();
+
    // Whitelist for critical SpotAnims/Graphics (the visual effects themselves)
    private static final Set<Integer> CRITICAL_SPOTANIMS = ImmutableSet.<Integer>builder()
+           .addAll(FORCE_OPAQUE_SPOTANIMS)
            .add(SpotanimID.LEVELUP_ANIM, SpotanimID.LEVELUP_99_ANIM, SpotanimID.LEVELUP_MAX) //Level-up fireworks
            //SpotanimID.java
            .add(2145, 2146, 317) //Kephri dung
@@ -702,18 +710,7 @@ public class VisibilityEnhancer extends Plugin
          combatTimerMap.put(player, currentTick);
       }
 
-      boolean hasGraphic = CRITICAL_SPOTANIMS.contains(player.getGraphic());
-      if (!hasGraphic && player.getSpotAnims() != null)
-      {
-         for (ActorSpotAnim spotAnim : player.getSpotAnims())
-         {
-            if (CRITICAL_SPOTANIMS.contains(spotAnim.getId()))
-            {
-               hasGraphic = true;
-               break;
-            }
-         }
-      }
+      boolean hasGraphic = hasSpotAnim(player, CRITICAL_SPOTANIMS);
       if (hasGraphic) lastCriticalGraphicCycleMap.put(player, currentCycle);
       Integer lastGraphic = lastCriticalGraphicCycleMap.get(player);
       boolean protectedGraphic = lastGraphic != null
@@ -723,6 +720,10 @@ public class VisibilityEnhancer extends Plugin
 
       Model model = player.getModel();
       boolean hasOverride = shouldForceOpaqueForOverride(player, model);
+      boolean wasOpaqueSpotAnim = opaqueSpotAnimPlayers.contains(player);
+      boolean hasOpaqueSpotAnim = shouldForceOpaqueForSpotAnim(player);
+      if (hasOpaqueSpotAnim) opaqueSpotAnimPlayers.add(player);
+      else opaqueSpotAnimPlayers.remove(player);
       if (protectedGraphic || hasOverride) exemptPlayers.add(player);
       else exemptPlayers.remove(player);
 
@@ -738,11 +739,46 @@ public class VisibilityEnhancer extends Plugin
       }
 
       // Restoring a mechanic must not wait behind ordinary queued updates.
-      if (hasOverride)
+      if (hasOverride || hasOpaqueSpotAnim)
       {
          restoreOpacity(player);
          restoreClothing(player);
       }
+      else if (wasOpaqueSpotAnim)
+      {
+         // End protection promptly without waiting for the ordinary update queue.
+         if (player == client.getLocalPlayer())
+         {
+            applyConfiguredOpacity(player);
+            if (config.selfClearGround()) applyClothingFilter(player);
+         }
+         else
+         {
+            updateGhostedPlayer(player, config.othersClearGround());
+         }
+      }
+   }
+
+   private boolean shouldForceOpaqueForSpotAnim(Player player)
+   {
+      // Preserve the existing deliberate Peek exception to normal safety rules.
+      return !peekHeld && hasSpotAnim(player, FORCE_OPAQUE_SPOTANIMS);
+   }
+
+   private static boolean hasSpotAnim(Player player, Set<Integer> ids)
+   {
+      if (player == null || ids.isEmpty()) return false;
+      if (ids.contains(player.getGraphic())) return true;
+
+      IterableHashTable<ActorSpotAnim> spotAnims = player.getSpotAnims();
+      if (spotAnims != null)
+      {
+         for (ActorSpotAnim spotAnim : spotAnims)
+         {
+            if (ids.contains(spotAnim.getId())) return true;
+         }
+      }
+      return false;
    }
 
    @Subscribe
@@ -838,6 +874,7 @@ public class VisibilityEnhancer extends Plugin
 
       lastCriticalGraphicCycleMap.remove(p);
       criticalGraphicPlayers.remove(p);
+      opaqueSpotAnimPlayers.remove(p);
       exemptPlayers.remove(p);
       culledPlayers.remove(p);
       lastCombatCycleMap.remove(p);
@@ -1440,6 +1477,11 @@ public class VisibilityEnhancer extends Plugin
          return 100;
       }
 
+      if (shouldForceOpaqueForSpotAnim(player))
+      {
+         return 100;
+      }
+
       boolean isLocal = (player == local);
       // Clear Ground filters equipment separately; it no longer disables body opacity.
       int baseOpacity = isLocal ? config.selfOpacity() : config.playerOpacity();
@@ -1811,6 +1853,12 @@ public class VisibilityEnhancer extends Plugin
    {
       Model currentModel = player.getModel();
       if (currentModel != null && shouldForceOpaqueForOverride(player, currentModel))
+      {
+         restoreClothing(player);
+         return;
+      }
+
+      if (shouldForceOpaqueForSpotAnim(player))
       {
          restoreClothing(player);
          return;
@@ -2231,6 +2279,12 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
+      if (shouldForceOpaqueForSpotAnim(p))
+      {
+         restoreOpacity(p);
+         return;
+      }
+
       byte[] trans = model.getFaceTransparencies();
 
       boolean isBaseState = (p.getAnimation() == -1 && p.getGraphic() == -1);
@@ -2297,6 +2351,7 @@ public class VisibilityEnhancer extends Plugin
       overrideForcedPlayers.remove(p);
 
       // Selection exits must also undo legacy scene culling immediately.
+      opaqueSpotAnimPlayers.remove(p);
       culledPlayers.remove(p);
 
       PlayerComposition comp = p.getPlayerComposition();
@@ -2357,6 +2412,7 @@ public class VisibilityEnhancer extends Plugin
 
       lastCriticalGraphicCycleMap.clear();
       criticalGraphicPlayers.clear();
+      opaqueSpotAnimPlayers.clear();
       exemptPlayers.clear();
       culledPlayers.clear();
       combatTimerMap.clear();
