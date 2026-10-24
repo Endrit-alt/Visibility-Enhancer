@@ -330,8 +330,6 @@ public class VisibilityEnhancer extends Plugin
            NpcID.CRYSTAL_HUNLLEF_CRYSTALS_ECHO_CRYSTALS // Echo Hunllef tornado
    );
 
-   // Code-only opt-in: add chosen IDs with .add(id1, id2). Empty means disabled.
-   // Preserve native opacity only while a selected effect is present (no grace).
    private static final Set<Integer> FORCE_OPAQUE_SPOTANIMS = ImmutableSet.<Integer>builder()
            .add(4290, 4291, 4292)
            .build();
