@@ -622,6 +622,9 @@ public class VisibilityEnhancer extends Plugin
 
       cachedLocalPlayer = client.getLocalPlayer();
 
+      // Range membership follows rendered movement, so admit arrivals between game ticks.
+      refreshPlayerUpdateQueue(false);
+
       // Clear the sets exactly once per tick to recalculate everyone flawlessly
       exemptPlayers.clear();
       criticalGraphicPlayers.clear();
@@ -1097,7 +1100,7 @@ public class VisibilityEnhancer extends Plugin
          restoreClothing(local);
       }
 
-      refreshPlayerUpdateQueue();
+      refreshPlayerUpdateQueue(true);
    }
 
    @Subscribe
@@ -1536,10 +1539,11 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
-      refreshPlayerUpdateQueue();
+      refreshPlayerUpdateQueue(true);
    }
 
-   private void refreshPlayerUpdateQueue()
+   // requeueAll: periodically re-run setup for admitted players; otherwise queue only newcomers.
+   private void refreshPlayerUpdateQueue(boolean requeueAll)
    {
       updatePlayersInRange();
       pendingPlayerUpdates.retainAll(currentInRange);
@@ -1558,7 +1562,19 @@ public class VisibilityEnhancer extends Plugin
 
       // LinkedHashSet deduplicates without moving waiting players to the back.
       // Rebuilding this queue every tick would starve its tail at low FPS.
-      pendingPlayerUpdates.addAll(currentInRange);
+      if (requeueAll)
+      {
+         pendingPlayerUpdates.addAll(currentInRange);
+         return;
+      }
+
+      for (Player player : currentInRange)
+      {
+         if (!ghostedPlayers.contains(player))
+         {
+            pendingPlayerUpdates.add(player);
+         }
+      }
    }
 
    private void processNextPlayerUpdate()
