@@ -105,6 +105,15 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default boolean ignoreFriends() { return false; }
 
+	@ConfigItem(
+			keyName = "keepIgnoredPlayersVisible",
+			name = "Keep Ignored Players Visible",
+			position = 6,
+			section = opacitySection,
+			description = "Exclude players on your ignore list from player opacity effects."
+	)
+	default boolean keepIgnoredPlayersVisible() { return false; }
+
 
 	// --- PROXIMITY FADING SECTION ---
 	@ConfigSection(

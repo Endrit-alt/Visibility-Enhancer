@@ -639,10 +639,11 @@ public class VisibilityEnhancer extends Plugin
 
       cachedLocalPlayer = client.getLocalPlayer();
 
-      // Follow movement between game ticks only where selection latency is most visible.
+      // Follow movement between game ticks for every distance and fading setting.
       // Queue newcomers without repeatedly scheduling setup for already-admitted players.
-      if (cachedLocalPlayer != null && (config.distanceBasedOpacity() || config.proximityRange() == 0))
+      if (cachedLocalPlayer != null)
       {
+         // Player setup remains limited to one queued update per rendered frame.
          refreshPlayerUpdateQueue(false);
       }
 
@@ -1009,6 +1010,7 @@ public class VisibilityEnhancer extends Plugin
       currentInRange.clear();
 
       boolean ignoreFriends = config.ignoreFriends();
+      NameableContainer<Ignore> ignoredPlayers = config.keepIgnoredPlayersVisible() ? client.getIgnoreContainer() : null;
       int maxDist = config.proximityRange();
       int localX = localLoc.getSceneX();
       int localY = localLoc.getSceneY();
@@ -1023,6 +1025,11 @@ public class VisibilityEnhancer extends Plugin
          boolean isFriend = ignoreFriends && (p.isFriend() || client.isFriended(p.getName(), false));
 
          if (isFriend)
+         {
+            continue;
+         }
+
+         if (ignoredPlayers != null && p.getName() != null && ignoredPlayers.findByName(p.getName()) != null)
          {
             continue;
          }
