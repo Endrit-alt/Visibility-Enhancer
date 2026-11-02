@@ -470,6 +470,23 @@ public class VisibilityEnhancer extends Plugin
          case 12889:
             return config.coxOlm();
 
+         case 16471:
+            return config.tfaArchiveGuardian();
+         case 16214:
+            return config.tfaEzekiel();
+         case 16727:
+            return config.tfaBork();
+         case 16216:
+            return config.tfaMoia();
+         case 16728:
+            return config.tfaDreadnoth();
+         case 16215:
+            return config.tfaDagonhai();
+         case 16726:
+            return config.tfaXarth();
+         case 16472:
+            return config.tfaOcellus();
+
          case 11601:
             return config.otherNex();
          case 15515:
@@ -621,6 +638,13 @@ public class VisibilityEnhancer extends Plugin
       }
 
       cachedLocalPlayer = client.getLocalPlayer();
+
+      // Follow movement between game ticks only where selection latency is most visible.
+      // Queue newcomers without repeatedly scheduling setup for already-admitted players.
+      if (cachedLocalPlayer != null && (config.distanceBasedOpacity() || config.proximityRange() == 0))
+      {
+         refreshPlayerUpdateQueue(false);
+      }
 
       // Clear the sets exactly once per tick to recalculate everyone flawlessly
       exemptPlayers.clear();
@@ -1541,6 +1565,12 @@ public class VisibilityEnhancer extends Plugin
 
    private void refreshPlayerUpdateQueue()
    {
+      refreshPlayerUpdateQueue(true);
+   }
+
+   // Full game-tick/forced refreshes retain periodic setup; client ticks only queue arrivals.
+   private void refreshPlayerUpdateQueue(boolean requeueAll)
+   {
       updatePlayersInRange();
       pendingPlayerUpdates.retainAll(currentInRange);
       gpuPlayerModels.keySet().removeIf(p -> p != client.getLocalPlayer() && !currentInRange.contains(p));
@@ -1558,7 +1588,19 @@ public class VisibilityEnhancer extends Plugin
 
       // LinkedHashSet deduplicates without moving waiting players to the back.
       // Rebuilding this queue every tick would starve its tail at low FPS.
-      pendingPlayerUpdates.addAll(currentInRange);
+      if (requeueAll)
+      {
+         pendingPlayerUpdates.addAll(currentInRange);
+         return;
+      }
+
+      for (Player player : currentInRange)
+      {
+         if (!ghostedPlayers.contains(player))
+         {
+            pendingPlayerUpdates.add(player);
+         }
+      }
    }
 
    private void processNextPlayerUpdate()
