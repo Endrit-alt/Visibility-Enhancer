@@ -656,8 +656,8 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigItem(keyName = "coxRest", name = "Rest of Raid", section = coxSection, position = 2, description = "Enable in the rest of Chambers of Xeric (Upper, Middle, Lower floors)")
 	default boolean coxRest() { return true; }
 
-	// --- THE FRACTURED ARCHIVE ---
-	@ConfigSection(name = "The Fractured Archive", description = "Fractured Archive Rooms", position = 54, closedByDefault = true)
+	// --- NEW RAID ---
+	@ConfigSection(name = "New raid", description = "New raid rooms", position = 54, closedByDefault = true)
 	String tfaSection = "tfaSection";
 
 	@ConfigItem(keyName = "tfaArchiveGuardian", name = "Archive Guardian", section = tfaSection, position = 1, description = "Enable in Archive Guardian room")
