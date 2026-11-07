@@ -471,21 +471,21 @@ public class VisibilityEnhancer extends Plugin
             return config.coxOlm();
 
          case 16471:
-            return config.tfaArchiveGuardian();
+            return config.raid4ArchiveGuardian();
          case 16214:
-            return config.tfaEzekiel();
+            return config.raid4Ezekiel();
          case 16727:
-            return config.tfaBork();
+            return config.raid4Bork();
          case 16216:
-            return config.tfaMoia();
+            return config.raid4Moia();
          case 16728:
-            return config.tfaDreadnoth();
+            return config.raid4Dreadnoth();
          case 16215:
-            return config.tfaDagonhai();
+            return config.raid4Dagonhai();
          case 16726:
-            return config.tfaXarth();
+            return config.raid4Xarth();
          case 16472:
-            return config.tfaOcellus();
+            return config.raid4Ocellus();
 
          case 11601:
             return config.otherNex();
