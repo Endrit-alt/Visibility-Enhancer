@@ -1993,7 +1993,53 @@ public class VisibilityEnhancer extends Plugin
 
    private boolean isGpuPlayerOpacityActive()
    {
-      return gpuOpacityEnabled && gpuDrawCallbacks != null && client.getDrawCallbacks() == gpuDrawCallbacks;
+      GpuOpacityDrawCallbacks wrapper = gpuDrawCallbacks;
+      if (!gpuOpacityEnabled || wrapper == null || wrapper.isClosed())
+      {
+         return false;
+      }
+      DrawCallbacks current = client.getDrawCallbacks();
+      if (current == null || (current != wrapper && GpuOpacityDrawCallbacks.supports(current)))
+      {
+         return false; // No GPU renderer, or it restarted and its bare callbacks replaced the chain.
+      }
+      if (wrapper.isOverUnknownWrapper())
+      {
+         // Only trusted once the zone renderer's scene setup actually passes through it (117 HD's
+         // legacy renderer never sends it), so a wrapper that cannot fade keeps the fallback path.
+         return wrapper.sceneCallbacksSeen() && wrapper.inDrawPath();
+      }
+      // Outermost, or another plugin wrapped ours and the client's callbacks still pass through it.
+      return current == wrapper || wrapper.inDrawPath();
+   }
+
+   /** The built-in GPU plugin or 117 HD is running (another plugin may wrap its draw callbacks). */
+   boolean isSupportedRendererRunning()
+   {
+      return isRendererPluginRunning(false);
+   }
+
+   boolean isHdRendererRunning()
+   {
+      return isRendererPluginRunning(true);
+   }
+
+   private boolean isRendererPluginRunning(boolean hdOnly)
+   {
+      if (pluginManager == null || !client.isGpu())
+      {
+         return false;
+      }
+      for (Plugin plugin : pluginManager.getPlugins())
+      {
+         boolean renderer = "rs117.hd.HdPlugin".equals(plugin.getClass().getName())
+                 || (!hdOnly && plugin instanceof net.runelite.client.plugins.gpu.GpuPlugin);
+         if (renderer && pluginManager.isPluginActive(plugin))
+         {
+            return true;
+         }
+      }
+      return false;
    }
 
    private boolean canChangeRendererCallbacks()
@@ -2013,50 +2059,108 @@ public class VisibilityEnhancer extends Plugin
       }
 
       DrawCallbacks current = client.getDrawCallbacks();
-      if (gpuDrawCallbacks != null && current == gpuDrawCallbacks)
+      GpuOpacityDrawCallbacks wrapper = gpuDrawCallbacks;
+      if (wrapper != null && !wrapper.isClosed())
       {
-         return;
+         boolean wasActive = isGpuPlayerOpacityActive();
+         // Ownership evidence and decisions only in stable states: map loaders capture the callback identity.
+         if (canChangeRendererCallbacks())
+         {
+            wrapper.frameTick();
+         }
+         // Another plugin may wrap ours: that is fine while the client's callbacks still pass through it.
+         // Bare supported callbacks mean the renderer restarted and replaced the whole chain.
+         boolean bypassed = current != wrapper
+                 && (current == null || GpuOpacityDrawCallbacks.supports(current) || wrapper.isBypassed());
+         if (!bypassed)
+         {
+            boolean active = isGpuPlayerOpacityActive();
+            if (active && !wasActive)
+            {
+               restoreLegacyPlayerWrites();
+            }
+            else if (!active && wasActive)
+            {
+               gpuPlayerModels.clear();
+               gpuNpcModels.clear();
+            }
+            return;
+         }
+         log.debug("Render-time opacity wrapper was bypassed by {}", current == null ? null : current.getClass().getName());
       }
 
-      // Never replace an unrelated renderer or another plugin's callback wrapper.
-      if (gpuDrawCallbacks != null) gpuDrawCallbacks.close();
+      // Never replace an unrelated renderer; closed wrappers only forward from now on.
+      if (wrapper != null) wrapper.close();
       gpuDrawCallbacks = null;
       gpuPlayerModels.clear();
       gpuNpcModels.clear();
-      if (!GpuOpacityDrawCallbacks.supports(current))
+
+      // An outer plugin can later restore one of our retired forwarding wrappers.
+      // Unwrap only our own inert wrappers, and never change callback identity while loading.
+      if (current instanceof GpuOpacityDrawCallbacks && ((GpuOpacityDrawCallbacks) current).isClosed())
+      {
+         if (!canChangeRendererCallbacks()) return;
+         do
+         {
+            current = ((GpuOpacityDrawCallbacks) current).getDelegate();
+         }
+         while (current instanceof GpuOpacityDrawCallbacks && ((GpuOpacityDrawCallbacks) current).isClosed());
+         client.setDrawCallbacks(current);
+      }
+      if (current instanceof GpuOpacityDrawCallbacks)
+      {
+         return; // Never wrap one of our own wrappers: its model views would be prepared twice.
+      }
+      boolean direct = GpuOpacityDrawCallbacks.supports(current);
+      // Another plugin's wrapper over the built-in GPU plugin or 117 HD: the client hands it the same
+      // per-frame scratch models synchronously, so ours can sit on top of it. It only activates once the
+      // zone renderer's scene callbacks actually pass through it; other renderers keep the fallback.
+      boolean overWrapper = !direct && current != null && isSupportedRendererRunning();
+      if (!direct && !overWrapper)
       {
          return;
       }
 
       // BeforeRender retries once the initial scene has finished loading. Keep an
-      // existing wrapper installed across later loads (the identity check above).
+      // existing wrapper installed across later loads (the in-path check above).
       if (!canChangeRendererCallbacks())
       {
          return;
       }
 
       // Undo any legacy player alpha writes before switching to renderer-only views.
-      for (Player player : new ArrayList<>(playerTrackedTransparencies.keySet()))
-      {
-         restoreOpacity(player);
-      }
+      restoreLegacyPlayerWrites();
 
-      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuModel);
+      boolean hd = direct ? !(current instanceof net.runelite.client.plugins.gpu.GpuPlugin) : isHdRendererRunning();
+      gpuDrawCallbacks = new GpuOpacityDrawCallbacks(current, this::prepareGpuModel, overWrapper, hd);
       client.setDrawCallbacks(gpuDrawCallbacks);
-      log.debug("Render-time player/NPC opacity enabled for {}", current.getClass().getName());
+      log.debug("Render-time player/NPC opacity installed over {}{}", current.getClass().getName(),
+              overWrapper ? " (another plugin's callback wrapper)" : "");
    }
 
    private boolean detachGpuDrawCallbacks()
    {
-      if (gpuDrawCallbacks != null && client.getDrawCallbacks() == gpuDrawCallbacks)
+      GpuOpacityDrawCallbacks wrapper = gpuDrawCallbacks;
+      DrawCallbacks current = client.getDrawCallbacks();
+      if (wrapper != null && !wrapper.isClosed() && current != wrapper && !GpuOpacityDrawCallbacks.supports(current))
+      {
+         // Another plugin's wrapper sits on top of ours, and removing ours would break its chain. Keep ours
+         // dormant instead: shutdown already stopped every effect, and a re-enable resumes through it.
+         wrapper.suspend();
+         gpuPlayerModels.clear();
+         gpuNpcModels.clear();
+         return true;
+      }
+      // Closing is terminal: a wrapper we cannot remove only forwards from now on.
+      if (wrapper != null) wrapper.close();
+      if (wrapper != null && current == wrapper)
       {
          if (!canChangeRendererCallbacks())
          {
             return false;
          }
-         client.setDrawCallbacks(gpuDrawCallbacks.getDelegate());
+         client.setDrawCallbacks(wrapper.getDelegate());
       }
-      if (gpuDrawCallbacks != null) gpuDrawCallbacks.close();
       gpuDrawCallbacks = null;
       gpuPlayerModels.clear();
       gpuNpcModels.clear();
@@ -2366,7 +2470,20 @@ public class VisibilityEnhancer extends Plugin
       {
          return;
       }
+      restoreLegacyOpacity(p);
+   }
 
+   /** Undo legacy player alpha writes before renderer-only views take over (also when the path just became active). */
+   private void restoreLegacyPlayerWrites()
+   {
+      for (Player player : new ArrayList<>(playerTrackedTransparencies.keySet()))
+      {
+         restoreLegacyOpacity(player);
+      }
+   }
+
+   private void restoreLegacyOpacity(Player p)
+   {
       Model model = p.getModel();
       if (model != null)
       {
