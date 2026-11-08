@@ -656,33 +656,33 @@ public interface VisibilityEnhancerConfig extends Config
 	@ConfigItem(keyName = "coxRest", name = "Rest of Raid", section = coxSection, position = 2, description = "Enable in the rest of Chambers of Xeric (Upper, Middle, Lower floors)")
 	default boolean coxRest() { return true; }
 
-	// --- NEW RAID ---
-	@ConfigSection(name = "New raid", description = "New raid rooms", position = 54, closedByDefault = true)
-	String raid4Section = "raid4Section";
+	// --- THE FRACTURED ARCHIVE ---
+	@ConfigSection(name = "The Fractured Archive", description = "Fractured Archive Rooms", position = 54, closedByDefault = true)
+	String tfaSection = "tfaSection";
 
-	@ConfigItem(keyName = "raid4ArchiveGuardian", name = "Archive Guardian", section = raid4Section, position = 1, description = "Enable in Archive Guardian room")
-	default boolean raid4ArchiveGuardian() { return true; }
+	@ConfigItem(keyName = "tfaArchiveGuardian", name = "Archive Guardian", section = tfaSection, position = 1, description = "Enable in Archive Guardian room")
+	default boolean tfaArchiveGuardian() { return true; }
 
-	@ConfigItem(keyName = "raid4Ezekiel", name = "Ezekiel", section = raid4Section, position = 2, description = "Enable in Ezekiel room")
-	default boolean raid4Ezekiel() { return true; }
+	@ConfigItem(keyName = "tfaEzekiel", name = "Ezekiel", section = tfaSection, position = 2, description = "Enable in Ezekiel room")
+	default boolean tfaEzekiel() { return true; }
 
-	@ConfigItem(keyName = "raid4Bork", name = "Bork", section = raid4Section, position = 3, description = "Enable in Bork room")
-	default boolean raid4Bork() { return true; }
+	@ConfigItem(keyName = "tfaBork", name = "Bork", section = tfaSection, position = 3, description = "Enable in Bork room")
+	default boolean tfaBork() { return true; }
 
-	@ConfigItem(keyName = "raid4Moia", name = "Moia", section = raid4Section, position = 4, description = "Enable in Moia room")
-	default boolean raid4Moia() { return true; }
+	@ConfigItem(keyName = "tfaMoia", name = "Moia", section = tfaSection, position = 4, description = "Enable in Moia room")
+	default boolean tfaMoia() { return true; }
 
-	@ConfigItem(keyName = "raid4Dreadnoth", name = "Dreadnoth the Jellied", section = raid4Section, position = 5, description = "Enable in Dreadnoth room")
-	default boolean raid4Dreadnoth() { return true; }
+	@ConfigItem(keyName = "tfaDreadnoth", name = "Dreadnoth the Jellied", section = tfaSection, position = 5, description = "Enable in Dreadnoth room")
+	default boolean tfaDreadnoth() { return true; }
 
-	@ConfigItem(keyName = "raid4Dagonhai", name = "Dagon'hai Elder", section = raid4Section, position = 6, description = "Enable in Dagon'hai Elder room")
-	default boolean raid4Dagonhai() { return true; }
+	@ConfigItem(keyName = "tfaDagonhai", name = "Dagon'hai Elder", section = tfaSection, position = 6, description = "Enable in Dagon'hai Elder room")
+	default boolean tfaDagonhai() { return true; }
 
-	@ConfigItem(keyName = "raid4Xarth", name = "Xarth", section = raid4Section, position = 7, description = "Enable in Xarth room")
-	default boolean raid4Xarth() { return true; }
+	@ConfigItem(keyName = "tfaXarth", name = "Xarth", section = tfaSection, position = 7, description = "Enable in Xarth room")
+	default boolean tfaXarth() { return true; }
 
-	@ConfigItem(keyName = "raid4Ocellus", name = "Ocellus", section = raid4Section, position = 8, description = "Enable in Ocellus room")
-	default boolean raid4Ocellus() { return true; }
+	@ConfigItem(keyName = "tfaOcellus", name = "Ocellus", section = tfaSection, position = 8, description = "Enable in Ocellus room")
+	default boolean tfaOcellus() { return true; }
 
 	// --- OTHER BOSSES ---
 	@ConfigSection(name = "Other Bosses", description = "Other Boss Rooms", position = 55, closedByDefault = true)

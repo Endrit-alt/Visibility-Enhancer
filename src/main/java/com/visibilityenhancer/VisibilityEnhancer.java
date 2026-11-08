@@ -234,7 +234,7 @@ public class VisibilityEnhancer extends Plugin
            5939, // Hueycotl
            15515, // Nightmare
            13106, // Zalcano
-           16213, 16214, 16215, 16216, 16217, 16469, 16470, 16471, 16472, 16473, 16725, 16726, 16727, 16728, 16729, 16981, 16982, 16983, 16984, 16985, 17237, 17238, 17239, 17240, 17241 //raid4
+           16213, 16214, 16215, 16216, 16217, 16469, 16470, 16471, 16472, 16473, 16725, 16726, 16727, 16728, 16729, 16981, 16982, 16983, 16984, 16985, 17237, 17238, 17239, 17240, 17241 //TFA
    );
 
    private static final Set<Integer> EXEMPT_ANIMATIONS = ImmutableSet.<Integer>builder()
@@ -471,21 +471,21 @@ public class VisibilityEnhancer extends Plugin
             return config.coxOlm();
 
          case 16471:
-            return config.raid4ArchiveGuardian();
+            return config.tfaArchiveGuardian();
          case 16214:
-            return config.raid4Ezekiel();
+            return config.tfaEzekiel();
          case 16727:
-            return config.raid4Bork();
+            return config.tfaBork();
          case 16216:
-            return config.raid4Moia();
+            return config.tfaMoia();
          case 16728:
-            return config.raid4Dreadnoth();
+            return config.tfaDreadnoth();
          case 16215:
-            return config.raid4Dagonhai();
+            return config.tfaDagonhai();
          case 16726:
-            return config.raid4Xarth();
+            return config.tfaXarth();
          case 16472:
-            return config.raid4Ocellus();
+            return config.tfaOcellus();
 
          case 11601:
             return config.otherNex();
