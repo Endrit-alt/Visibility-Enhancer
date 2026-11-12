@@ -356,6 +356,8 @@ public class VisibilityEnhancer extends Plugin
       private final int type;
       private final int amount;
       private final int disappearsOnGameCycle;
+      // Fixed layout slot (0-3) for this hit's whole lifetime, like native hitsplats.
+      private final int slot;
    }
 
    @Getter
@@ -541,11 +543,17 @@ public class VisibilityEnhancer extends Plugin
             List<CustomHitsplat> list = customHitsplats.computeIfAbsent(p, k -> new ArrayList<>());
             list.removeIf(h -> currentCycle >= h.getDisappearsOnGameCycle());
             // Copy values: do not retain a client-owned hitsplat that may be reused.
-            CustomHitsplat newHit = new CustomHitsplat(hitsplat.getHitsplatType(), amount, disappearsOnGameCycle);
+            int type = hitsplat.getHitsplatType();
 
             if (list.size() < 4)
             {
-               list.add(newHit);
+               // Lowest free slot: existing hits never move.
+               int slot = 0;
+               while (hitsplatSlotTaken(list, slot))
+               {
+                  slot++;
+               }
+               list.add(new CustomHitsplat(type, amount, disappearsOnGameCycle, slot));
             }
             else
             {
@@ -583,11 +591,24 @@ public class VisibilityEnhancer extends Plugin
 
                if (targetIndex != -1)
                {
-                  list.set(targetIndex, newHit);
+                  // The new hit takes the replaced hit's slot.
+                  list.set(targetIndex, new CustomHitsplat(type, amount, disappearsOnGameCycle, list.get(targetIndex).getSlot()));
                }
             }
          }
       }
+   }
+
+   private static boolean hitsplatSlotTaken(List<CustomHitsplat> list, int slot)
+   {
+      for (CustomHitsplat hit : list)
+      {
+         if (hit.getSlot() == slot)
+         {
+            return true;
+         }
+      }
+      return false;
    }
 
    // Called before overhead layout as well as on game ticks, so expired hits neither
@@ -940,7 +961,10 @@ public class VisibilityEnhancer extends Plugin
          return;
       }
 
-      if (originalEquipmentMap.containsKey(p) && p.getPlayerComposition() != null)
+      // Record the new appearance as the player's real gear, unless it is still exactly our Clear Ground
+      // state (an event without a real equipment change must not record the removed pieces as their gear).
+      if (originalEquipmentMap.containsKey(p) && p.getPlayerComposition() != null
+              && !isClearGroundEquipment(originalEquipmentMap.get(p), p.getPlayerComposition().getEquipmentIds()))
       {
          originalEquipmentMap.put(p, p.getPlayerComposition().getEquipmentIds().clone());
       }
@@ -962,6 +986,13 @@ public class VisibilityEnhancer extends Plugin
 
       if (ghostedPlayers.contains(p))
       {
+         // An appearance update restores every piece. In crowded areas the game sends one for everyone at
+         // once, and the one-player-per-frame queue would show their pieces until each player's turn.
+         // Remove them now (cheap: no model rebuild); the full update stays queued.
+         if (config.othersClearGround())
+         {
+            stripClearGroundPieces(p);
+         }
          pendingPlayerUpdates.add(p);
       }
    }
@@ -1896,6 +1927,68 @@ public class VisibilityEnhancer extends Plugin
       }
    }
 
+   private static final int[] CLEAR_GROUND_SLOTS = {
+           KitType.CAPE.getIndex(),
+           KitType.SHIELD.getIndex(),
+           KitType.LEGS.getIndex(),
+           KitType.BOOTS.getIndex()
+   };
+
+   /** The current equipment is the original with only Clear Ground's pieces removed. */
+   private static boolean isClearGroundEquipment(int[] original, int[] current)
+   {
+      if (original == null || current == null || original.length != current.length)
+      {
+         return false;
+      }
+      for (int i = 0; i < current.length; i++)
+      {
+         boolean hidden = false;
+         for (int slot : CLEAR_GROUND_SLOTS)
+         {
+            hidden |= slot == i;
+         }
+         if (current[i] != (hidden ? -1 : original[i]))
+         {
+            return false;
+         }
+      }
+      return true;
+   }
+
+   /**
+    * Immediate part of applyClothingFilter for appearance-update bursts: only the equipment ids and hash, never a
+    * model rebuild or alpha work. Players whose pieces are shown for a mechanic keep them; the queued full update
+    * (applyClothingFilter) re-checks the protections and opacity.
+    */
+   private void stripClearGroundPieces(Player player)
+   {
+      if (opaqueSpotAnimPlayers.contains(player) || overrideForcedPlayers.contains(player))
+      {
+         return;
+      }
+      PlayerComposition comp = player.getPlayerComposition();
+      if (comp == null)
+      {
+         return;
+      }
+      int[] equipmentIds = comp.getEquipmentIds();
+      originalEquipmentMap.putIfAbsent(player, equipmentIds.clone());
+      boolean changed = false;
+      for (int slot : CLEAR_GROUND_SLOTS)
+      {
+         if (equipmentIds[slot] != -1)
+         {
+            equipmentIds[slot] = -1;
+            changed = true;
+         }
+      }
+      if (changed)
+      {
+         comp.setHash();
+      }
+   }
+
    private void applyClothingFilter(Player player)
    {
       Model currentModel = player.getModel();
@@ -1924,15 +2017,8 @@ public class VisibilityEnhancer extends Plugin
          originalEquipmentMap.put(player, equipmentIds.clone());
       }
 
-      int[] slotsToHide = {
-              KitType.CAPE.getIndex(),
-              KitType.SHIELD.getIndex(),
-              KitType.LEGS.getIndex(),
-              KitType.BOOTS.getIndex()
-      };
-
       boolean changed = false;
-      for (int slot : slotsToHide)
+      for (int slot : CLEAR_GROUND_SLOTS)
       {
          if (equipmentIds[slot] != -1)
          {

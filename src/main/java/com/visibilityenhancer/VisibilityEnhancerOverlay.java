@@ -53,6 +53,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private final VisibilityEnhancerConfig config;
 	private final VisibilityOutlineRenderer modelOutlineRenderer;
 	private final SpriteManager spriteManager;
+	private final HitsplatArtwork hitsplatArtwork;
 
 	private final Set<StackedHighlightTracker.TileKey> renderedTiles = new HashSet<>();
 	private final Set<StackedHighlightTracker.TileKey> renderedNpcTiles = new HashSet<>();
@@ -119,6 +120,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		this.config = config;
 		this.modelOutlineRenderer = modelOutlineRenderer;
 		this.spriteManager = spriteManager;
+		this.hitsplatArtwork = new HitsplatArtwork(client);
 
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_SCENE);
@@ -598,6 +600,20 @@ public class VisibilityEnhancerOverlay extends Overlay
 		graphics.fillRect(x, y, fill, height);
 	}
 
+	// Placement adapted from CustomizeALot's "RuneScape" layout preset (Ruined Heir, BSD 2-Clause; the notice is in
+	// HitsplatArtwork): each hit keeps its slot until it expires. Slots go centre, then above, right, below
+	// (a diamond, clockwise), spaced from the largest splat this player has shown, overlapping like native splats.
+	private static final BufferedImage HITSPLAT_ANCHOR = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+	private static final int HITSPLAT_SLOT_WIDTH = 30;
+	private static final int HITSPLAT_SLOT_HEIGHT = 20;
+	private static final int HITSPLAT_SLOT_EDGE_CUT = 7;
+	private static final int HITSPLAT_X_SPACING = -8;
+	private static final int HITSPLAT_Y_SPACING = -10;
+	// Cycles without a drawn hitsplat before a player's slot size starts over (CustomizeALot: when no hits remain).
+	private static final int HITSPLAT_SLOT_RESET_CYCLES = 25;
+	// Per player: {slot width, slot height, last drawn game cycle}.
+	private final Map<Player, int[]> hitsplatSlotSizes = new WeakHashMap<>();
+
 	private void drawTransparentHitsplats(Graphics2D graphics, Player player, List<VisibilityEnhancer.CustomHitsplat> hitsplats, int opacityPercent)
 	{
 		int alpha = (int) ((opacityPercent / 100f) * 255);
@@ -608,14 +624,8 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 		int bgAlpha = config.hideHitsplatBackground() ? 0 : (int) (alpha * 0.8f);
 
-		LocalPoint lp = player.getLocalLocation();
-		if (lp == null)
-		{
-			return;
-		}
-
-		Point basePoint = Perspective.localToCanvas(client, lp, client.getPlane(), player.getLogicalHeight() / 2);
-		if (basePoint == null)
+		Point anchor = player.getCanvasImageLocation(HITSPLAT_ANCHOR, player.getLogicalHeight() / 2);
+		if (anchor == null)
 		{
 			return;
 		}
@@ -626,135 +636,98 @@ public class VisibilityEnhancerOverlay extends Overlay
 		int boxTextHeight = fm.getAscent() - 1;
 		int paddingX = 1;
 		int paddingY = 1;
-		int boxHeight = boxTextHeight + (paddingY * 2);
-		int ySpacing = boxHeight + 2;
+		int textBoxHeight = boxTextHeight + (paddingY * 2);
 		int size = hitsplats.size();
 
-		int shiftDown = 0;
-		Point hpPoint = player.getCanvasTextLocation(graphics, "", player.getLogicalHeight() + 15);
-		if (hpPoint != null)
+		// The game's own hitsplat artwork when available; the simple box otherwise.
+		boolean numberOnly = config.hideHitsplatBackground();
+		BufferedImage[] artwork = new BufferedImage[size];
+		int cycle = client.getGameCycle();
+		int[] slotSize = hitsplatSlotSizes.get(player);
+		if (slotSize == null || cycle - slotSize[2] > HITSPLAT_SLOT_RESET_CYCLES)
 		{
-			int hpBarBottom = (hpPoint.getY() - 2) + 5;
-			int ceilingY = hpBarBottom + 2;
-
-			int highestOffsetY = 0;
-			if (size == 2)
-			{
-				highestOffsetY = -(ySpacing / 2);
-			}
-			else if (size == 4)
-			{
-				highestOffsetY = -ySpacing;
-			}
-			else if (size > 1)
-			{
-				int totalRows = (size + 1) / 2;
-				highestOffsetY = -((totalRows - 1) * ySpacing / 2);
-			}
-
-			int highestBoxY = basePoint.getY() + highestOffsetY - (boxHeight / 2) - 10;
-			if (highestBoxY < ceilingY)
-			{
-				shiftDown = ceilingY - highestBoxY;
-			}
+			slotSize = new int[]{HITSPLAT_SLOT_WIDTH, HITSPLAT_SLOT_HEIGHT, cycle};
+			hitsplatSlotSizes.put(player, slotSize);
 		}
-
-		int maxTextWidth = 0;
-		for (VisibilityEnhancer.CustomHitsplat hit : hitsplats)
+		slotSize[2] = cycle;
+		for (int i = 0; i < size; i++)
 		{
-			int w = fm.stringWidth(String.valueOf(hit.getAmount()));
-			if (w > maxTextWidth)
+			VisibilityEnhancer.CustomHitsplat hit = hitsplats.get(i);
+			BufferedImage image = hitsplatArtwork.render(hit.getType(), hit.getAmount(), numberOnly);
+			artwork[i] = image;
+			if (image == HitsplatArtwork.HIDDEN)
 			{
-				maxTextWidth = w;
+				continue;
 			}
+			int width = image != null ? image.getWidth() : fm.stringWidth(String.valueOf(hit.getAmount())) + 1 + (paddingX * 2);
+			int height = image != null ? image.getHeight() : textBoxHeight;
+			slotSize[0] = Math.max(slotSize[0], width);
+			slotSize[1] = Math.max(slotSize[1], height);
 		}
-
-		int maxBoxWidth = maxTextWidth + 1 + (paddingX * 2);
-		int xSpacing = maxBoxWidth + 2;
+		int sideSpacing = slotSize[0] - HITSPLAT_SLOT_EDGE_CUT + HITSPLAT_X_SPACING;
+		int verticalSpacing = slotSize[1] + HITSPLAT_Y_SPACING;
 
 		for (int i = 0; i < size; i++)
 		{
 			VisibilityEnhancer.CustomHitsplat hit = hitsplats.get(i);
+			BufferedImage image = artwork[i];
+			if (image == HitsplatArtwork.HIDDEN)
+			{
+				continue;
+			}
+
+			int[] offset = hitsplatSlotOffset(hit.getSlot(), sideSpacing, verticalSpacing);
+			int centerX = anchor.getX() + offset[0];
+			int centerY = anchor.getY() + offset[1];
+			if (image != null)
+			{
+				// Composed at full opacity, then drawn once at the hitsplat opacity: one even transparency.
+				Composite previous = graphics.getComposite();
+				graphics.setComposite(AlphaComposite.SrcOver.derive(alpha / 255f));
+				graphics.drawImage(image, centerX - image.getWidth() / 2, centerY - image.getHeight() / 2, null);
+				graphics.setComposite(previous);
+				continue;
+			}
+
+			// Artwork not available (yet): the simple box.
 			String text = String.valueOf(hit.getAmount());
-			int textWidth = fm.stringWidth(text);
-			int boxWidth = textWidth + 1 + (paddingX * 2);
-
-			int offsetX = 0;
-			int offsetY = 0;
-
-			if (size == 1)
-			{
-				offsetX = 0;
-				offsetY = 0;
-			}
-			else if (size == 2)
-			{
-				offsetX = 0;
-				offsetY = (i == 0) ? -(ySpacing / 2) : (ySpacing / 2);
-			}
-			else if (size == 4)
-			{
-				if (i == 0)
-				{
-					offsetX = 0;
-					offsetY = -ySpacing;
-				}
-				else if (i == 1)
-				{
-					offsetX = -(xSpacing / 2);
-					offsetY = 0;
-				}
-				else if (i == 2)
-				{
-					offsetX = (xSpacing / 2);
-					offsetY = 0;
-				}
-				else if (i == 3)
-				{
-					offsetX = 0;
-					offsetY = ySpacing;
-				}
-			}
-			else
-			{
-				int row = i / 2;
-				int col = i % 2;
-				int totalRows = (size + 1) / 2;
-
-				if (row == totalRows - 1 && size % 2 != 0)
-				{
-					offsetX = 0;
-				}
-				else
-				{
-					offsetX = (col == 0) ? -(xSpacing / 2) : (xSpacing / 2);
-				}
-
-				offsetY = (row * ySpacing) - ((totalRows - 1) * ySpacing / 2);
-			}
-
-			int boxX = basePoint.getX() + offsetX - (boxWidth / 2);
-			int boxY = basePoint.getY() + offsetY - (boxHeight / 2) - 10 + shiftDown;
+			int boxWidth = fm.stringWidth(text) + 1 + (paddingX * 2);
+			int boxX = centerX - (boxWidth / 2);
+			int boxY = centerY - (textBoxHeight / 2);
 
 			if (bgAlpha > 0)
 			{
 				Color typeColor = HitsplatStyle.colorFor(hit.getType(), hit.getAmount());
 				Color backColor = new Color(typeColor.getRed(), typeColor.getGreen(), typeColor.getBlue(), bgAlpha);
 				graphics.setColor(backColor);
-				graphics.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 2, 2);
+				graphics.fillRoundRect(boxX, boxY, boxWidth, textBoxHeight, 2, 2);
 			}
 
 			int textDrawX = boxX + paddingX;
 			int textDrawY = boxY + boxTextHeight + paddingY + 1;
 
-			Color textShadowColor = new Color(0, 0, 0, alpha);
-			Color textColor = new Color(255, 255, 255, alpha);
-
-			graphics.setColor(textShadowColor);
+			graphics.setColor(new Color(0, 0, 0, alpha));
 			graphics.drawString(text, textDrawX + 1, textDrawY + 1);
-
-			graphics.setColor(textColor);
+			graphics.setColor(new Color(255, 255, 255, alpha));
 			graphics.drawString(text, textDrawX, textDrawY);
+		}
+	}
+
+	/** CustomizeALot's diamond, clockwise, from the centre: 0 centre, 1 above, 2 right, 3 below, 4 left. */
+	static int[] hitsplatSlotOffset(int slot, int sideSpacing, int verticalSpacing)
+	{
+		switch (slot)
+		{
+			case 0:
+				return new int[]{0, 0};
+			case 1:
+				return new int[]{0, -verticalSpacing};
+			case 2:
+				return new int[]{sideSpacing, 0};
+			case 3:
+				return new int[]{0, verticalSpacing};
+			default:
+				return new int[]{-sideSpacing, 0};
 		}
 	}
 
