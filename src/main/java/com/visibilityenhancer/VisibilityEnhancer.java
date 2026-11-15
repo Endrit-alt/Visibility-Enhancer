@@ -81,6 +81,9 @@ public class VisibilityEnhancer extends Plugin
    private VisibilityEnhancerOutlineOverlay outlineOverlay;
 
    @Inject
+   private VisibilityEnhancerLabelOverlay labelOverlay;
+
+   @Inject
    private Hooks hooks;
 
    @Inject
@@ -370,6 +373,7 @@ public class VisibilityEnhancer extends Plugin
       overlayManager.add(overlay);
       overlayManager.add(overheadOverlay);
       overlayManager.add(outlineOverlay);
+      overlayManager.add(labelOverlay);
       hooks.registerRenderableDrawListener(drawListener);
       keyManager.registerKeyListener(hotkeyListener);
       keyManager.registerKeyListener(peekListener);
@@ -404,6 +408,7 @@ public class VisibilityEnhancer extends Plugin
       overlayManager.remove(overlay);
       overlayManager.remove(overheadOverlay);
       overlayManager.remove(outlineOverlay);
+      overlayManager.remove(labelOverlay);
       hooks.unregisterRenderableDrawListener(drawListener);
       keyManager.unregisterKeyListener(hotkeyListener);
       keyManager.unregisterKeyListener(peekListener);
@@ -936,6 +941,7 @@ public class VisibilityEnhancer extends Plugin
    {
       if (event.getGameState() != GameState.LOGGED_IN)
       {
+         if (overlay != null) overlay.resetSceneState();
          // Never admit work selected for a scene that is being unloaded.
          pendingPlayerUpdates.clear();
          customHitsplats.clear();
@@ -1002,7 +1008,11 @@ public class VisibilityEnhancer extends Plugin
    {
       if (event.getGroup().equals("visibilityenhancer"))
       {
-         clientThread.invokeLater(this::checkStateTransition);
+         clientThread.invokeLater(() ->
+         {
+            if (overlay != null) overlay.resetSceneState();
+            checkStateTransition();
+         });
 
          if (event.getKey().equals("selfClearGround") && !config.selfClearGround())
          {
@@ -1165,8 +1175,8 @@ public class VisibilityEnhancer extends Plugin
    @Subscribe
    public void onBeforeRender(BeforeRender event)
    {
-      // Discard a previous frame's queue even if its late overlay pass was skipped.
-      if (overlay != null) overlay.clearPendingOutlines();
+      // One scene-state update per rendered frame; skipped late passes cannot replay.
+      if (overlay != null) overlay.beginFrame();
       syncGpuDrawCallbacks();
 
       if (gpuDrawCallbacks != null)
@@ -2072,6 +2082,23 @@ public class VisibilityEnhancer extends Plugin
       originalEquipmentMap.remove(player);
    }
 
+   /**
+    * The renderer's own actor draws for this frame are known: the supported GPU/HD path is active and at
+    * least one actor draw reached our wrapper (so a wrapper above ours that keeps actor draws to itself
+    * falls back to the model-based checks).
+    */
+   boolean hasActorDrawInfo()
+   {
+      return isGpuPlayerOpacityActive() && gpuDrawCallbacks.sawActorDraws();
+   }
+
+   /** With hasActorDrawInfo(): null if the renderer did not draw this actor this frame, else its drawn model's raw colour override. */
+   Boolean getDrawnActorOverride(Actor actor)
+   {
+      GpuOpacityDrawCallbacks wrapper = gpuDrawCallbacks;
+      return wrapper == null ? null : wrapper.getDrawnActorOverride(actor);
+   }
+
    Actor getStackHighlightActor(Actor actor)
    {
       return isGpuPlayerOpacityActive() ? gpuDrawCallbacks.getStackHighlightActor(actor) : null;
@@ -2260,7 +2287,7 @@ public class VisibilityEnhancer extends Plugin
       {
          return true;
       }
-      if (overlay != null) overlay.clearPendingOutlines();
+      if (overlay != null) overlay.resetSceneState();
       pendingPlayerUpdates.clear();
       if (!detachGpuDrawCallbacks())
       {
@@ -2613,6 +2640,7 @@ public class VisibilityEnhancer extends Plugin
 
    private void clearAllGhosting()
    {
+      if (overlay != null) overlay.resetSceneState();
       Set<Player> allAffected = new HashSet<>(ghostedPlayers);
       allAffected.addAll(fallbackHiddenPlayers);
       allAffected.addAll(originalEquipmentMap.keySet());

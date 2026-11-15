@@ -67,10 +67,24 @@ final class VisibilityOutlineRenderer
 		private final double distance;
 		private final int distanceGroupIndex;
 		private final double alphaMultiply;
+		// Whether the group one step further in x / y is still within the outline width. Pixels are
+		// never queued into groups that would not be drawn.
+		private final boolean growX;
+		private final boolean growY;
 	}
 
 	private static final int MAX_OUTLINE_WIDTH = 50;
 	private static final int MAX_FEATHER = 4;
+	// Inside this class a layer's softness is a number of "fade steps". 0 to FULL_FADE is the upstream straight
+	// fade covering 0 to 100% of the layer width. Above FULL_FADE, up to MAX_FADE, the full-width fade is mixed
+	// with its cube (fully cubic at MAX_FADE), so the layer falls away faster towards its outer edge. Plain
+	// multiplications: no extra cost per frame.
+	private static final int FULL_FADE = 20;
+	private static final int MAX_FADE = 30;
+	// Glow Blur slider: 1 to SOFT_GLOW_START lengthens the straight fade in equal steps (10 is the full width,
+	// what every value from 4 to 10 used to give); above it, up to MAX_GLOW_BLUR, the curve gets steeper.
+	static final int SOFT_GLOW_START = 10;
+	static final int MAX_GLOW_BLUR = 20;
 	private static final int DIRECT_WRITE_OUTLINE_WIDTH_THRESHOLD = 10;
 
 	private final Client client;
@@ -174,7 +188,6 @@ final class VisibilityOutlineRenderer
 
 		if (precomputedGroupIndices[outlineWidth][feather] == null)
 		{
-			double fadedDistance = (double) feather / MAX_FEATHER * (outlineWidth - 0.5);
 			List<PixelDistanceGroupIndex> ps = new ArrayList<>();
 			for (int x = 0; x <= outlineWidth; x++)
 			{
@@ -191,15 +204,32 @@ final class VisibilityOutlineRenderer
 						continue;
 					}
 
-					double outerDist = outlineWidth - dist + 0.5;
-					double multipliedAlpha = outerDist < fadedDistance ? outerDist / fadedDistance : 1.0;
-					ps.add(new PixelDistanceGroupIndex(dist, x + y * outlineArrayWidth, multipliedAlpha));
+					ps.add(new PixelDistanceGroupIndex(dist, x + y * outlineArrayWidth,
+						alphaMultiply(dist, outlineWidth, feather),
+						Math.hypot(x + 1, y) <= outlineWidth, Math.hypot(x, y + 1) <= outlineWidth));
 				}
 			}
 			ps.sort(Comparator.comparingDouble(PixelDistanceGroupIndex::getDistance));
 			precomputedGroupIndices[outlineWidth][feather] = ps.toArray(new PixelDistanceGroupIndex[0]);
 		}
 		return precomputedGroupIndices[outlineWidth][feather];
+	}
+
+	/**
+	 * The feathered opacity of an outline pixel at a distance from the model (upstream formula up to
+	 * FULL_FADE). The feather here is in fade steps, see {@link #lineFade} and {@link #glowFade}.
+	 */
+	private static double alphaMultiply(double dist, int outlineWidth, int feather)
+	{
+		double fadedDistance = (double) Math.min(feather, FULL_FADE) / FULL_FADE * (outlineWidth - 0.5);
+		double outerDist = outlineWidth - dist + 0.5;
+		double alpha = outerDist < fadedDistance ? outerDist / fadedDistance : 1.0;
+		if (feather <= FULL_FADE)
+		{
+			return alpha;
+		}
+		double soft = (double) (Math.min(feather, MAX_FADE) - FULL_FADE) / (MAX_FADE - FULL_FADE);
+		return alpha * (1 - soft) + alpha * alpha * alpha * soft;
 	}
 
 	private void ensureDistanceDeltasCreated(int outlineWidth)
@@ -685,14 +715,12 @@ final class VisibilityOutlineRenderer
 					}
 					else
 					{
-						for (int bit = 0; bit < 32; bit++)
+						// Same pixels in the same order as testing every bit.
+						for (int diff = v1 ^ v2; diff != 0; diff &= diff - 1)
 						{
-							int bv1 = (v1 >>> bit) & 1;
+							int bit = Integer.numberOfTrailingZeros(diff);
 							int bv2 = (v2 >>> bit) & 1;
-							if (bv1 != bv2)
-							{
-								enqueueOutlinePixel(outlineArrayWidth, croppedX1 + x + bit, croppedY1 + y - bv2);
-							}
+							enqueueOutlinePixel(outlineArrayWidth, croppedX1 + x + bit, croppedY1 + y - bv2);
 						}
 					}
 				}
@@ -754,14 +782,16 @@ final class VisibilityOutlineRenderer
 					}
 					else
 					{
-						for (int bit = 1; bit < end; bit++)
+						// Bits that differ from the bit before them, for bits 1..end-1; same order as a bit loop.
+						int edges = (v ^ (v << 1)) & ~1;
+						if (end < 32)
 						{
-							int bv = (v >>> bit) & 1;
-							if (bv != lastBv)
-							{
-								enqueueOutlinePixel(1, croppedX1 + x + bit - bv, croppedY1 + y);
-							}
-							lastBv = bv;
+							edges &= (1 << Math.max(end, 0)) - 1;
+						}
+						for (; edges != 0; edges &= edges - 1)
+						{
+							int bit = Integer.numberOfTrailingZeros(edges);
+							enqueueOutlinePixel(1, croppedX1 + x + bit - ((v >>> bit) & 1), croppedY1 + y);
 						}
 					}
 				}
@@ -803,38 +833,56 @@ final class VisibilityOutlineRenderer
 	}
 
 	/**
-	 * Process the outline queue and draw an outline of the pixels
-	 * in the queue to the client image buffer.
+	 * Process the outline queue and draw the queued layers to the client image buffer in one traversal.
+	 * <p>
+	 * A pixel's distance group does not depend on the outline width, so a narrower layer sees exactly the
+	 * groups a traversal of its own would. Each pixel is blended with the first layer and then the second,
+	 * the same arithmetic in the same order as two separate traversals.
 	 *
-	 * @param outlineWidth The width of the outline.
-	 * @param color The color of the outline.
+	 * @param width The widest layer: how far the traversal grows.
+	 * @param color The color of both layers.
+	 * @param firstWidth The width of the first layer (drawn underneath).
+	 * @param secondWidth The width of the second layer, or 0 for a single layer.
 	 */
-	private void processOutlinePixelQueue(int outlineWidth, Color color, int feather)
+	private void processOutlinePixelQueue(int width, Color color,
+		int firstWidth, int firstFeather, int secondWidth, int secondFeather)
 	{
 		MainBufferProvider bufferProvider = (MainBufferProvider) client.getBufferProvider();
 		BufferedImage image = (BufferedImage) bufferProvider.getImage();
 		int imageWidth = image.getWidth();
 		int[] imageData = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
-		PixelDistanceGroupIndex[] ps = getPriorityList(outlineWidth, feather);
+		PixelDistanceGroupIndex[] ps = getPriorityList(width, 0);
+		final int[] visited = this.visited;
+		final int croppedWidth = this.croppedWidth;
 
 		for (PixelDistanceGroupIndex p : ps)
 		{
 			final int[] blockMemory = outlinePixelsBlockBuffer.getMemory();
 
-			final int colorARGB;
-			final int inverseAlpha;
+			final boolean first = p.distance <= firstWidth;
+			final boolean second = secondWidth > 0 && p.distance <= secondWidth;
+			int firstARGB = 0;
+			int firstInverseAlpha = 256;
+			if (first)
 			{
-				int alpha = (int) Math.round(color.getAlpha() * p.alphaMultiply);
-				inverseAlpha = 256 - alpha;
-				colorARGB = (alpha << 24)
-					| ((color.getRed() * alpha) / 255) << 16
-					| ((color.getGreen() * alpha) / 255) << 8
-					| ((color.getBlue() * alpha) / 255);
+				int alpha = (int) Math.round(color.getAlpha() * alphaMultiply(p.distance, firstWidth, firstFeather));
+				firstInverseAlpha = 256 - alpha;
+				firstARGB = premultiply(color, alpha);
+			}
+			int secondARGB = 0;
+			int secondInverseAlpha = 256;
+			if (second)
+			{
+				int alpha = (int) Math.round(color.getAlpha() * alphaMultiply(p.distance, secondWidth, secondFeather));
+				secondInverseAlpha = 256 - alpha;
+				secondARGB = premultiply(color, alpha);
 			}
 
 			final int groupIndex = p.distanceGroupIndex;
 			final int nextGroupIndexY = groupIndex + outlineArrayWidth;
 			final int nextGroupIndexX = groupIndex + 1;
+			final boolean growX = p.growX;
+			final boolean growY = p.growY;
 
 			while (outlinePixelsBlockIndicesLengths[groupIndex] > 0)
 			{
@@ -854,23 +902,45 @@ final class VisibilityOutlineRenderer
 
 					int pixelPos = y * imageWidth + x;
 					int dst = imageData[pixelPos];
-					imageData[pixelPos] = blendOutlinePixel(colorARGB, dst, inverseAlpha);
+					if (first)
+					{
+						dst = blendOutlinePixel(firstARGB, dst, firstInverseAlpha);
+					}
+					if (second)
+					{
+						dst = blendOutlinePixel(secondARGB, dst, secondInverseAlpha);
+					}
+					imageData[pixelPos] = dst;
 
-					if (x - 1 >= clipX1)
+					// A neighbour that is already drawn, or part of the model, would be skipped when
+					// taken from the queue. A group beyond the width is never taken from the queue.
+					// Leaving both out changes no pixel. A neighbour of a group that can still grow
+					// lies inside the padded crop, so the bit lookups stay in range.
+					if (growX)
 					{
-						enqueueOutlinePixel(nextGroupIndexX, x - 1, y);
+						int pos = visitedPixelPos - 1;
+						if (x - 1 >= clipX1 && (visited[pos >> 5] & (1 << (pos & 31))) == 0)
+						{
+							enqueueOutlinePixel(nextGroupIndexX, x - 1, y);
+						}
+						pos = visitedPixelPos + 1;
+						if (x + 1 < clipX2 && (visited[pos >> 5] & (1 << (pos & 31))) == 0)
+						{
+							enqueueOutlinePixel(nextGroupIndexX, x + 1, y);
+						}
 					}
-					if (x + 1 < clipX2)
+					if (growY)
 					{
-						enqueueOutlinePixel(nextGroupIndexX, x + 1, y);
-					}
-					if (y - 1 >= clipY1)
-					{
-						enqueueOutlinePixel(nextGroupIndexY, x, y - 1);
-					}
-					if (y + 1 < clipY2)
-					{
-						enqueueOutlinePixel(nextGroupIndexY, x, y + 1);
+						int pos = visitedPixelPos - croppedWidth;
+						if (y - 1 >= clipY1 && (visited[pos >> 5] & (1 << (pos & 31))) == 0)
+						{
+							enqueueOutlinePixel(nextGroupIndexY, x, y - 1);
+						}
+						pos = visitedPixelPos + croppedWidth;
+						if (y + 1 < clipY2 && (visited[pos >> 5] & (1 << (pos & 31))) == 0)
+						{
+							enqueueOutlinePixel(nextGroupIndexY, x, y + 1);
+						}
 					}
 				}
 
@@ -879,6 +949,15 @@ final class VisibilityOutlineRenderer
 				outlinePixelsLastBlockLength[groupIndex] = OutlinePixelBuffer.BLOCK_SIZE;
 			}
 		}
+	}
+
+	/** The colour premultiplied by a layer's alpha, with upstream rounding. */
+	private static int premultiply(Color color, int alpha)
+	{
+		return (alpha << 24)
+			| ((color.getRed() * alpha) / 255) << 16
+			| ((color.getGreen() * alpha) / 255) << 8
+			| ((color.getBlue() * alpha) / 255);
 	}
 
 	/**
@@ -970,8 +1049,28 @@ final class VisibilityOutlineRenderer
 
 			if (!directWrite)
 			{
-				processOutlinePixelQueue(outlineWidth, color, feather);
+				processOutlinePixelQueue(outlineWidth, color, outlineWidth, feather, 0, 0);
 			}
+		}
+		finally
+		{
+			freeAllBlockMemory();
+		}
+	}
+
+	/**
+	 * Glow and primary line, both translucent or feathered, in a single traversal of the outline pixels.
+	 * Pixel for pixel the same result as drawing the glow layer and then the line layer.
+	 */
+	private void drawPreparedQueuedLayers(int glowWidth, int glowFeather, int outlineWidth, int outlineFeather, Color color)
+	{
+		int width = Math.max(glowWidth, outlineWidth);
+		outlineArrayWidth = width + 2;
+		initializeOutlineBuffers();
+		try
+		{
+			processInitialOutlinePixels(false, color, width);
+			processOutlinePixelQueue(width, color, glowWidth, glowFeather, outlineWidth, outlineFeather);
 		}
 		finally
 		{
@@ -981,7 +1080,23 @@ final class VisibilityOutlineRenderer
 
 	public void drawOutline(Actor actor, int outlineWidth, Color color, int feather)
 	{
-		drawOutlineLayers(actor, color, outlineWidth, feather, 0, 0);
+		// A single layer keeps the upstream feather range (0 to 4, larger values count as 4).
+		drawLayers(actor, color, outlineWidth, lineFade(feather), 0, 0);
+	}
+
+	/** Upstream feather (0 to 4, larger values count as 4) in fade steps. */
+	private static int lineFade(int feather)
+	{
+		return Math.max(0, Math.min(feather, MAX_FEATHER)) * (FULL_FADE / MAX_FEATHER);
+	}
+
+	/** The Glow Blur slider value in fade steps: every step from 1 to 20 gives a different fade. */
+	private static int glowFade(int blur)
+	{
+		blur = Math.max(0, Math.min(blur, MAX_GLOW_BLUR));
+		return blur <= SOFT_GLOW_START
+			? blur * (FULL_FADE / SOFT_GLOW_START)
+			: FULL_FADE + (blur - SOFT_GLOW_START) * ((MAX_FADE - FULL_FADE) / (MAX_GLOW_BLUR - SOFT_GLOW_START));
 	}
 
 	/**
@@ -990,6 +1105,13 @@ final class VisibilityOutlineRenderer
 	 * model/silhouette contents, is reused across actor draws.
 	 */
 	void drawOutlineLayers(Actor actor, Color color,
+		int glowWidth, int glowBlur, int outlineWidth, int outlineFeather)
+	{
+		drawLayers(actor, color, glowWidth, glowFade(glowBlur), outlineWidth, lineFade(outlineFeather));
+	}
+
+	/** Both layers with their softness already in fade steps. */
+	private void drawLayers(Actor actor, Color color,
 		int glowWidth, int glowFeather, int outlineWidth, int outlineFeather)
 	{
 		glowWidth = Math.max(0, Math.min(glowWidth, MAX_OUTLINE_WIDTH));
@@ -998,9 +1120,6 @@ final class VisibilityOutlineRenderer
 		{
 			return;
 		}
-		glowFeather = Math.max(0, Math.min(glowFeather, MAX_FEATHER));
-		outlineFeather = Math.max(0, Math.min(outlineFeather, MAX_FEATHER));
-
 		LocalPoint lp = actor.getLocalLocation();
 		if (lp == null)
 		{
@@ -1016,6 +1135,13 @@ final class VisibilityOutlineRenderer
 			Perspective.getFootprintTileHeight(client, lp, wv.getPlane(), actor.getFootprintSize()) - actor.getAnimationHeightOffset(),
 			actor.getCurrentOrientation(), Math.max(glowWidth, outlineWidth)))
 		{
+			return;
+		}
+
+		if (glowWidth > 0 && outlineWidth > 0
+			&& !canDirectWrite(glowWidth, color, glowFeather) && !canDirectWrite(outlineWidth, color, outlineFeather))
+		{
+			drawPreparedQueuedLayers(glowWidth, glowFeather, outlineWidth, outlineFeather, color);
 			return;
 		}
 

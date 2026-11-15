@@ -33,6 +33,7 @@ import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
+import net.runelite.api.Scene;
 import net.runelite.api.SpriteID;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -41,7 +42,6 @@ import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.ui.overlay.OverlayPriority;
 import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.util.Text;
 
@@ -61,6 +61,10 @@ public class VisibilityEnhancerOverlay extends Overlay
 	// Retain list capacity, not models or per-outline image buffers. Selection runs once.
 	private final List<Actor> pendingOutlineActors = new ArrayList<>(32);
 	private final List<Color> pendingOutlineColors = new ArrayList<>(32);
+	private final List<VisibilityEnhancerLabelOverlay.StackCountLabel> pendingLabels = new ArrayList<>();
+	private boolean scenePassRendered;
+	private Scene frameScene;
+	private int framePlane;
 	private final List<Player> sortedChatPlayers = new ArrayList<>(32);
 	private final OverheadTextLayout overheadTextLayout = new OverheadTextLayout();
 
@@ -124,18 +128,38 @@ public class VisibilityEnhancerOverlay extends Overlay
 
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_SCENE);
-		setPriority(OverlayPriority.HIGH);
+		setPriority(PRIORITY_LOW);
 	}
 
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		clearPendingOutlines();
+		if (scenePassRendered) return null;
+		scenePassRendered = true;
+		frameScene = client.getScene();
+		framePlane = client.getPlane();
+		boolean complete = false;
+		try
+		{
+			Dimension result = renderScene(graphics);
+			complete = true;
+			return result;
+		}
+		finally
+		{
+			if (!complete) clearPendingSceneOverlays();
+		}
+	}
+
+	private Dimension renderScene(Graphics2D graphics)
+	{
 		if (!plugin.isActive())
 		{
+			resetSceneState();
 			return null;
 		}
 
+		actorDrawInfo = plugin.hasActorDrawInfo();
 		Player local = client.getLocalPlayer();
 		LocalPoint localLocalPoint = local != null ? local.getLocalLocation() : null;
 		boolean hideStacked = config.hideStackedOutlines();
@@ -175,8 +199,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		if (local != null && selfStyle != HighlightStyle.NONE
 				&& (localRepresentative == null || localRepresentative == local))
 		{
-			Model localModel = local.getModel();
-			if (localModel == null || localModel.getOverrideAmount() == 0)
+			if (!hasColourOverride(local))
 			{
 				if (selfStyle == HighlightStyle.TILE
 						|| selfStyle == HighlightStyle.TRUE_TILE
@@ -246,8 +269,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 					}
 				}
 
-				Model pModel = player.getModel();
-				if (pModel != null && pModel.getOverrideAmount() != 0)
+				if (hasColourOverride(player))
 				{
 					continue;
 				}
@@ -414,6 +436,27 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 	}
 
+	// Set once per tile pass: the renderer's own actor draws this frame are known (supported GPU/HD path).
+	private boolean actorDrawInfo;
+
+	/**
+	 * A raw colour override on the actor's model, for which highlights step aside. Read from the model the
+	 * renderer drew when that is known; otherwise from the actor, which rebuilds its model.
+	 */
+	private boolean hasColourOverride(Actor actor)
+	{
+		if (actorDrawInfo)
+		{
+			Boolean drawn = plugin.getDrawnActorOverride(actor);
+			if (drawn != null)
+			{
+				return drawn;
+			}
+		}
+		Model model = actor.getModel();
+		return model != null && model.getOverrideAmount() != 0;
+	}
+
 	private void queueOutline(Actor actor, Color color)
 	{
 		if (!config.enableGlow() && !config.enableOutline()) return;
@@ -427,12 +470,54 @@ public class VisibilityEnhancerOverlay extends Overlay
 		pendingOutlineColors.clear();
 	}
 
-	// Draw once after Tile Layers' scene mask, without masking against nearer actors.
+	private void clearPendingSceneOverlays()
+	{
+		clearPendingOutlines();
+		pendingLabels.clear();
+	}
+
+	void beginFrame()
+	{
+		clearPendingSceneOverlays();
+		scenePassRendered = false;
+		if (!plugin.isActive() || !config.enableStackWarnings()
+				|| frameScene != client.getScene() || framePlane != client.getPlane()) stackFadeStates.clear();
+	}
+
+	void resetSceneState()
+	{
+		clearPendingSceneOverlays();
+		stackFadeStates.clear();
+		frameScene = null;
+		// Do not admit another scene pass until the next BeforeRender.
+		scenePassRendered = true;
+	}
+
+	private boolean isCurrentSceneFrame()
+	{
+		return plugin.isActive() && frameScene == client.getScene() && framePlane == client.getPlane();
+	}
+
+	Dimension renderLabels(Graphics2D graphics)
+	{
+		try
+		{
+			if (!isCurrentSceneFrame() || !config.enableStackWarnings() || !config.showStackWarningNumber()) return null;
+			for (VisibilityEnhancerLabelOverlay.StackCountLabel label : pendingLabels) label.render(graphics);
+			return null;
+		}
+		finally
+		{
+			pendingLabels.clear();
+		}
+	}
+
+	// Complete all pixel writes inside the overlay call so overlay capture can see them.
 	Dimension renderOutlines(Graphics2D graphics)
 	{
 		try
 		{
-			if (!plugin.isActive()) return null;
+			if (!isCurrentSceneFrame()) return null;
 			for (int i = 0; i < pendingOutlineActors.size(); i++)
 			{
 				Actor actor = pendingOutlineActors.get(i);
@@ -1147,26 +1232,11 @@ public class VisibilityEnhancerOverlay extends Overlay
 						int anchorX = (int) (corner2D.getX() + (dx * pixelOffset));
 						int anchorY = (int) (corner2D.getY() + (dy * pixelOffset));
 
-						// We use state.lastCount here so the number stays frozen as it fades out!
-						String countText = String.valueOf(state.lastCount);
-						graphics.setFont(FontManager.getRunescapeBoldFont());
-						FontMetrics fm = graphics.getFontMetrics();
-
-						int textWidth = fm.stringWidth(countText);
-						int textHeight = fm.getAscent();
-						int drawX = anchorX - (textWidth / 2);
-						int drawY = anchorY + (textHeight / 2) - 2;
-
 						int textAlpha = (int) (baseColor.getAlpha() * fadeMultiplier);
-
 						Color textColor = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), textAlpha);
-						Color shadowColor = new Color(0, 0, 0, textAlpha);
-
-						graphics.setColor(shadowColor);
-						graphics.drawString(countText, drawX + 1, drawY + 1);
-
-						graphics.setColor(textColor);
-						graphics.drawString(countText, drawX, drawY);
+						// Freeze the same count/fade for the label pass; no second animation update.
+						pendingLabels.add(new VisibilityEnhancerLabelOverlay.StackCountLabel(
+								state.lastCount, anchorX, anchorY, textColor));
 					}
 				}
 			}

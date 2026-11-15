@@ -1,5 +1,7 @@
 package com.visibilityenhancer;
 
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
 import lombok.experimental.Delegate;
@@ -46,6 +48,10 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
    private BiFunction<Renderable, Model, Model> prepareModel;
    private volatile boolean closed;
    private final StackedHighlightTracker highlights = new StackedHighlightTracker();
+   // Every actor the renderer drew this frame, with whether the drawn model has a raw colour override.
+   // Lets highlights read the override without rebuilding the actor's model.
+   private final Map<Actor, Boolean> drawnActors = new IdentityHashMap<>();
+   private boolean trackDrawnActors;
    // Installed directly over GPU/HD (false), or over another plugin's callback wrapper (true).
    private final boolean overUnknownWrapper, hdRenderer;
    // Model views are only handed to the renderer on the thread that installed this wrapper (the client thread).
@@ -74,6 +80,8 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
       if (closed) return;
       closed = true;
       highlights.beginFrame(false);
+      trackDrawnActors = false;
+      drawnActors.clear();
       prepareModel = null; // Do not retain the plugin through another plugin's wrapper.
    }
 
@@ -85,6 +93,8 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
    void suspend()
    {
       highlights.beginFrame(false);
+      trackDrawnActors = false;
+      drawnActors.clear();
    }
 
    boolean isClosed()
@@ -95,6 +105,20 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
    void beginHighlightFrame(boolean enabled)
    {
       highlights.beginFrame(enabled && !closed);
+      drawnActors.clear();
+      trackDrawnActors = !closed;
+   }
+
+   /** At least one actor draw reached this wrapper this frame, so drawn-actor information is usable. */
+   boolean sawActorDraws()
+   {
+      return !drawnActors.isEmpty();
+   }
+
+   /** Null when the renderer did not draw this actor this frame, else whether its drawn model has a raw colour override. */
+   Boolean getDrawnActorOverride(Actor actor)
+   {
+      return drawnActors.get(actor);
    }
 
    Actor getStackHighlightActor(Actor actor)
@@ -191,6 +215,10 @@ final class GpuOpacityDrawCallbacks implements DrawCallbacks
          // Record the scene's chosen actor even when 0% suppresses its upload:
          // completely hidden stacks still need one correctly selected highlight.
          highlights.record((Actor) renderable, prepared != null);
+         if (trackDrawnActors)
+         {
+            drawnActors.put((Actor) renderable, model.getOverrideAmount() != 0);
+         }
       }
       if (prepared != null)
       {

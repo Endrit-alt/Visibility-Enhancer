@@ -7,7 +7,7 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-/** Draws selected model outlines after scene masks, but before character UI. */
+/** Draws selected model outlines and their glow synchronously after the tile pass. */
 public class VisibilityEnhancerOutlineOverlay extends Overlay
 {
 	private final VisibilityEnhancerOverlay overlay;
@@ -18,8 +18,7 @@ public class VisibilityEnhancerOutlineOverlay extends Overlay
 		this.overlay = overlay;
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_SCENE);
-		// Dynamic overlays draw low-to-high. Inspected Tile Layers versions use 0.6 / 2.
-		setPriority(3f);
+		setPriority(PRIORITY_HIGH);
 	}
 
 	@Override

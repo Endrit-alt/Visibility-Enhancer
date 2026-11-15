@@ -545,13 +545,13 @@ public interface VisibilityEnhancerConfig extends Config
 	)
 	default int glowWidth() { return 2; }
 
-	@Range(min = 1, max = 10)
+	@Range(min = 1, max = 20)
 	@ConfigItem(
 			keyName = "glowFeather",
 			name = "Glow Blur",
 			position = 6,
 			section = styleSection,
-			description = "Softness/Feathering of the glow layer"
+			description = "Softness/Feathering of the glow layer. Up to 10 the fade gets longer, above 10 it fades out in a softer curve"
 	)
 	default int glowFeather() { return 10; }
 
