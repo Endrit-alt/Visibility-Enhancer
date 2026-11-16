@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +60,6 @@ public class VisibilityEnhancerOverlay extends Overlay
 	// Retain list capacity, not models or per-outline image buffers. Selection runs once.
 	private final List<Actor> pendingOutlineActors = new ArrayList<>(32);
 	private final List<Color> pendingOutlineColors = new ArrayList<>(32);
-	private final List<VisibilityEnhancerLabelOverlay.StackCountLabel> pendingLabels = new ArrayList<>();
 	private boolean scenePassRendered;
 	private Scene frameScene;
 	private int framePlane;
@@ -90,16 +88,6 @@ public class VisibilityEnhancerOverlay extends Overlay
 			"Woo wooo!",
 			"Wooo?"
 	};
-
-	private static class StackFadeState
-	{
-		int firstSeenCycle;
-		Integer unstackCycle = null;
-		float fadeMultiplierAtUnstack = 0f;
-		int lastCount = 0;
-	}
-
-	private final Map<WorldPoint, StackFadeState> stackFadeStates = new HashMap<>();
 
 	private static class SpamTracker
 	{
@@ -147,7 +135,7 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 		finally
 		{
-			if (!complete) clearPendingSceneOverlays();
+			if (!complete) clearPendingOutlines();
 		}
 	}
 
@@ -293,9 +281,6 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 
 		renderNpcHighlights(graphics);
-
-		// Stack warnings should render independently of highlightOthers
-		renderStackWarnings(graphics);
 
 		return null;
 	}
@@ -470,24 +455,15 @@ public class VisibilityEnhancerOverlay extends Overlay
 		pendingOutlineColors.clear();
 	}
 
-	private void clearPendingSceneOverlays()
-	{
-		clearPendingOutlines();
-		pendingLabels.clear();
-	}
-
 	void beginFrame()
 	{
-		clearPendingSceneOverlays();
+		clearPendingOutlines();
 		scenePassRendered = false;
-		if (!plugin.isActive() || !config.enableStackWarnings()
-				|| frameScene != client.getScene() || framePlane != client.getPlane()) stackFadeStates.clear();
 	}
 
 	void resetSceneState()
 	{
-		clearPendingSceneOverlays();
-		stackFadeStates.clear();
+		clearPendingOutlines();
 		frameScene = null;
 		// Do not admit another scene pass until the next BeforeRender.
 		scenePassRendered = true;
@@ -496,20 +472,6 @@ public class VisibilityEnhancerOverlay extends Overlay
 	private boolean isCurrentSceneFrame()
 	{
 		return plugin.isActive() && frameScene == client.getScene() && framePlane == client.getPlane();
-	}
-
-	Dimension renderLabels(Graphics2D graphics)
-	{
-		try
-		{
-			if (!isCurrentSceneFrame() || !config.enableStackWarnings() || !config.showStackWarningNumber()) return null;
-			for (VisibilityEnhancerLabelOverlay.StackCountLabel label : pendingLabels) label.render(graphics);
-			return null;
-		}
-		finally
-		{
-			pendingLabels.clear();
-		}
 	}
 
 	// Complete all pixel writes inside the overlay call so overlay capture can see them.
@@ -906,340 +868,4 @@ public class VisibilityEnhancerOverlay extends Overlay
 		}
 	}
 
-	private void renderStackWarnings(Graphics2D graphics)
-	{
-		if (!config.enableStackWarnings())
-		{
-			stackFadeStates.clear(); // Clean up instantly if toggled off in settings
-			return;
-		}
-
-		Player local = client.getLocalPlayer();
-		if (local == null)
-		{
-			stackFadeStates.clear();
-			return;
-		}
-
-		WorldPoint localPoint = local.getWorldLocation();
-		Map<WorldPoint, Integer> tileCounts = new HashMap<>();
-
-		for (Player p : client.getPlayers())
-		{
-			if (p == null)
-			{
-				continue;
-			}
-
-			WorldPoint wp = p.getWorldLocation();
-			if (wp != null)
-			{
-				tileCounts.put(wp, tileCounts.getOrDefault(wp, 0) + 1);
-			}
-		}
-
-		boolean inCombat = local.getInteracting() != null || local.getHealthRatio() > -1;
-		boolean combatCheckPassed = !config.stackWarningOnlyInCombat() || inCombat;
-
-		Set<WorldPoint> currentlyStacked = new HashSet<>();
-
-		// Only populate currentlyStacked if we pass the combat check.
-		// If we fail the check, it acts as if everything unstacked, triggering a smooth fade out.
-		if (combatCheckPassed)
-		{
-			for (Map.Entry<WorldPoint, Integer> entry : tileCounts.entrySet())
-			{
-				WorldPoint wp = entry.getKey();
-				int count = entry.getValue();
-
-				if (config.stackWarningOnlySelf() && (localPoint == null || !localPoint.equals(wp)))
-				{
-					continue;
-				}
-
-				if (count >= config.stackThreshold())
-				{
-					currentlyStacked.add(wp);
-				}
-			}
-		}
-
-		int currentCycle = client.getGameCycle();
-		int delayCycles = config.stackWarningDelay() * 30;
-
-		List<WorldPoint> toRemove = new ArrayList<>();
-
-		// 1. Update existing fade states
-		for (Map.Entry<WorldPoint, StackFadeState> entry : stackFadeStates.entrySet())
-		{
-			WorldPoint wp = entry.getKey();
-			StackFadeState state = entry.getValue();
-			boolean isStacked = currentlyStacked.contains(wp);
-
-			if (isStacked)
-			{
-				if (state.unstackCycle != null)
-				{
-					// If it was fading out but stacked again, resume fading in smoothly
-					int equivalentElapsed = (int) (state.fadeMultiplierAtUnstack * 30.0f) + delayCycles;
-					state.firstSeenCycle = currentCycle - equivalentElapsed;
-					state.unstackCycle = null;
-				}
-
-				int elapsed = currentCycle - state.firstSeenCycle;
-				if (elapsed >= delayCycles)
-				{
-					state.fadeMultiplierAtUnstack = Math.min(1.0f, (elapsed - delayCycles) / 30.0f);
-				}
-				else
-				{
-					state.fadeMultiplierAtUnstack = 0f;
-				}
-				state.lastCount = tileCounts.get(wp); // Keep the number accurate while stacked
-			}
-			else
-			{
-				if (state.unstackCycle == null)
-				{
-					state.unstackCycle = currentCycle; // Lock in the moment it stopped stacking
-				}
-
-				float fadeOutAmount = (currentCycle - state.unstackCycle) / 30.0f;
-				float currentFade = state.fadeMultiplierAtUnstack - fadeOutAmount;
-
-				if (currentFade <= 0f)
-				{
-					toRemove.add(wp);
-				}
-			}
-		}
-
-		// 2. Add brand new stacked tiles to the tracker
-		for (WorldPoint wp : currentlyStacked)
-		{
-			if (!stackFadeStates.containsKey(wp))
-			{
-				StackFadeState newState = new StackFadeState();
-				newState.firstSeenCycle = currentCycle;
-				newState.lastCount = tileCounts.get(wp);
-				stackFadeStates.put(wp, newState);
-			}
-		}
-
-		for (WorldPoint wp : toRemove)
-		{
-			stackFadeStates.remove(wp);
-		}
-
-		// 3. Render all tracked states
-		for (Map.Entry<WorldPoint, StackFadeState> entry : stackFadeStates.entrySet())
-		{
-			WorldPoint wp = entry.getKey();
-			StackFadeState state = entry.getValue();
-
-			float fadeMultiplier = 0f;
-			if (state.unstackCycle != null)
-			{
-				fadeMultiplier = state.fadeMultiplierAtUnstack - ((currentCycle - state.unstackCycle) / 30.0f);
-			}
-			else
-			{
-				int elapsed = currentCycle - state.firstSeenCycle;
-				if (elapsed >= delayCycles)
-				{
-					fadeMultiplier = (elapsed - delayCycles) / 30.0f;
-				}
-			}
-			fadeMultiplier = Math.max(0f, Math.min(1.0f, fadeMultiplier));
-
-			if (fadeMultiplier <= 0f)
-			{
-				continue; // Don't draw if completely invisible
-			}
-
-			LocalPoint lp = LocalPoint.fromWorld(client, wp);
-			if (lp == null)
-			{
-				continue;
-			}
-
-			Color baseColor = config.stackWarningColor();
-			double pulseRange = 0.6;
-			double sine = Math.sin(currentCycle * 0.15);
-			int basePulseAlpha = (int) (baseColor.getAlpha() * (1.0 - (pulseRange * (sine + 1.0) / 2.0)));
-			basePulseAlpha = Math.max(0, Math.min(255, basePulseAlpha));
-
-			int pulseAlpha = (int) (basePulseAlpha * fadeMultiplier);
-			Color pulseColor = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), pulseAlpha);
-
-			Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-			if (poly != null)
-			{
-				int pillarHeight = config.stackWarningPillarHeight();
-				Point[] basePoints = null;
-				Point[] topPoints = null;
-				boolean projectionFailed = false;
-
-				java.awt.geom.Area clipArea = new java.awt.geom.Area(poly);
-
-				if (pillarHeight > 0)
-				{
-					int size = Perspective.LOCAL_TILE_SIZE / 2;
-					int[][] corners = {{-size, -size}, {size, -size}, {size, size}, {-size, size}};
-					basePoints = new Point[4];
-					topPoints = new Point[4];
-
-					for (int i = 0; i < 4; i++)
-					{
-						LocalPoint cornerLocal = new LocalPoint(lp.getX() + corners[i][0], lp.getY() + corners[i][1]);
-						basePoints[i] = Perspective.localToCanvas(client, cornerLocal, client.getPlane(), 0);
-						topPoints[i] = Perspective.localToCanvas(client, cornerLocal, client.getPlane(), pillarHeight);
-
-						if (basePoints[i] == null || topPoints[i] == null)
-						{
-							projectionFailed = true;
-							break;
-						}
-					}
-				}
-
-				if (pillarHeight > 0 && !projectionFailed)
-				{
-					Point bottomCenter = Perspective.localToCanvas(client, lp, client.getPlane(), 0);
-					Point topCenter = Perspective.localToCanvas(client, lp, client.getPlane(), pillarHeight);
-
-					if (bottomCenter != null && topCenter != null && bottomCenter.getY() != topCenter.getY())
-					{
-						int beamAlpha = Math.max(0, pulseAlpha / 2);
-						Color bottomColor = new Color(pulseColor.getRed(), pulseColor.getGreen(), pulseColor.getBlue(), beamAlpha);
-						Color topColor = new Color(pulseColor.getRed(), pulseColor.getGreen(), pulseColor.getBlue(), 0);
-
-						java.awt.GradientPaint beamGradient = new java.awt.GradientPaint(
-								(float) bottomCenter.getX(), (float) bottomCenter.getY(), bottomColor,
-								(float) topCenter.getX(), (float) topCenter.getY(), topColor
-						);
-						graphics.setPaint(beamGradient);
-
-						for (int i = 0; i < 4; i++)
-						{
-							int next = (i + 1) % 4;
-							Polygon wall = new Polygon();
-							wall.addPoint((int)basePoints[i].getX(), (int)basePoints[i].getY());
-							wall.addPoint((int)basePoints[next].getX(), (int)basePoints[next].getY());
-							wall.addPoint((int)topPoints[next].getX(), (int)topPoints[next].getY());
-							wall.addPoint((int)topPoints[i].getX(), (int)topPoints[i].getY());
-							graphics.fill(wall);
-
-							clipArea.add(new java.awt.geom.Area(wall));
-						}
-					}
-				}
-
-				graphics.setStroke(new BasicStroke(2));
-				graphics.setColor(pulseColor);
-				graphics.draw(poly);
-
-				if (poly.npoints == 4 && pulseAlpha > 0)
-				{
-					java.awt.Shape originalClip = graphics.getClip();
-					graphics.setClip(clipArea);
-
-					Stroke glowStroke = new BasicStroke(16, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER);
-					Stroke coreStroke = new BasicStroke(4, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER);
-
-					int glowAlpha = Math.min(255, (int)(pulseAlpha * 0.30));
-					int coreAlpha = Math.min(255, (int)(pulseAlpha * 0.75));
-
-					Color glowStart = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), glowAlpha);
-					Color coreStart = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), coreAlpha);
-					Color transparent = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), 0);
-
-					for (int pass = 0; pass < 2; pass++)
-					{
-						graphics.setStroke(pass == 0 ? glowStroke : coreStroke);
-						Color startColor = pass == 0 ? glowStart : coreStart;
-
-						for (int i = 0; i < 4; i++)
-						{
-							int prev = (i + 3) % 4;
-							int next = (i + 1) % 4;
-
-							int x1 = poly.xpoints[i];
-							int y1 = poly.ypoints[i];
-
-							float edgeFraction = 0.30f;
-
-							int endXNext = (int) (x1 + (poly.xpoints[next] - x1) * edgeFraction);
-							int endYNext = (int) (y1 + (poly.ypoints[next] - y1) * edgeFraction);
-
-							int endXPrev = (int) (x1 + (poly.xpoints[prev] - x1) * edgeFraction);
-							int endYPrev = (int) (y1 + (poly.ypoints[prev] - y1) * edgeFraction);
-
-							java.awt.geom.Path2D floorCorner = new java.awt.geom.Path2D.Float();
-							floorCorner.moveTo(endXPrev, endYPrev);
-							floorCorner.lineTo(x1, y1);
-							floorCorner.lineTo(endXNext, endYNext);
-
-							float radius = (float) Math.max(1.0, Math.hypot(endXNext - x1, endYNext - y1));
-							java.awt.RadialGradientPaint rgp = new java.awt.RadialGradientPaint(
-									x1, y1, radius,
-									new float[]{0f, 1f},
-									new Color[]{startColor, transparent}
-							);
-							graphics.setPaint(rgp);
-							graphics.draw(floorCorner);
-
-							if (pillarHeight > 0 && !projectionFailed)
-							{
-								int bx = (int) basePoints[i].getX();
-								int by = (int) basePoints[i].getY();
-								int tx = (int) topPoints[i].getX();
-								int ty = (int) topPoints[i].getY();
-
-								if (bx != tx || by != ty)
-								{
-									graphics.setPaint(new java.awt.GradientPaint(bx, by, startColor, tx, ty, transparent));
-									graphics.drawLine(bx, by, tx, ty);
-								}
-							}
-						}
-					}
-
-					graphics.setClip(originalClip);
-				}
-
-				if (config.showStackWarningNumber())
-				{
-					int halfSize = Perspective.LOCAL_TILE_SIZE / 2;
-					LocalPoint fixedCorner = new LocalPoint(lp.getX() - halfSize, lp.getY() - halfSize);
-
-					Point center2D = Perspective.localToCanvas(client, lp, client.getPlane());
-					Point corner2D = Perspective.localToCanvas(client, fixedCorner, client.getPlane());
-
-					if (center2D != null && corner2D != null)
-					{
-						double dx = corner2D.getX() - center2D.getX();
-						double dy = corner2D.getY() - center2D.getY();
-
-						double length = Math.sqrt(dx * dx + dy * dy);
-						if (length > 0)
-						{
-							dx /= length;
-							dy /= length;
-						}
-
-						int pixelOffset = 15;
-						int anchorX = (int) (corner2D.getX() + (dx * pixelOffset));
-						int anchorY = (int) (corner2D.getY() + (dy * pixelOffset));
-
-						int textAlpha = (int) (baseColor.getAlpha() * fadeMultiplier);
-						Color textColor = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), textAlpha);
-						// Freeze the same count/fade for the label pass; no second animation update.
-						pendingLabels.add(new VisibilityEnhancerLabelOverlay.StackCountLabel(
-								state.lastCount, anchorX, anchorY, textColor));
-					}
-				}
-			}
-		}
-	}
 }

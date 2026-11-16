@@ -81,9 +81,6 @@ public class VisibilityEnhancer extends Plugin
    private VisibilityEnhancerOutlineOverlay outlineOverlay;
 
    @Inject
-   private VisibilityEnhancerLabelOverlay labelOverlay;
-
-   @Inject
    private Hooks hooks;
 
    @Inject
@@ -373,7 +370,6 @@ public class VisibilityEnhancer extends Plugin
       overlayManager.add(overlay);
       overlayManager.add(overheadOverlay);
       overlayManager.add(outlineOverlay);
-      overlayManager.add(labelOverlay);
       hooks.registerRenderableDrawListener(drawListener);
       keyManager.registerKeyListener(hotkeyListener);
       keyManager.registerKeyListener(peekListener);
@@ -408,7 +404,6 @@ public class VisibilityEnhancer extends Plugin
       overlayManager.remove(overlay);
       overlayManager.remove(overheadOverlay);
       overlayManager.remove(outlineOverlay);
-      overlayManager.remove(labelOverlay);
       hooks.unregisterRenderableDrawListener(drawListener);
       keyManager.unregisterKeyListener(hotkeyListener);
       keyManager.unregisterKeyListener(peekListener);
